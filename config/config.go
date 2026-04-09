@@ -9,7 +9,7 @@ CacheTTLFast    = 25 * time.Second
 CacheTTLMed     = 60 * time.Second
 SignalCacheTTL  = 25 * time.Second
 DirCacheTTL     = 45 * time.Second
-Port            = ":8000"
+Port            = ":8239"
 )
 
 var TraderTickers = []string{

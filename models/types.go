@@ -50,10 +50,11 @@ type StabilityInfo struct {
 }
 
 type TradeSignal struct {
-	Signal, RawSignal, Prediction, OptionType, ValidUntil string
+	Signal, RawSignal, CrossAssetSignal, Prediction, CrossAssetPrediction, OptionType, ValidUntil string
 	Strike, NiftySpot, EntryEst, TargetEst, SLEst         float64
 	TargetNifty, SLNifty                                   float64
 	Confidence, ProbUp, ProbDown, ProbSideways             float64
+	CrossAssetProbs                                        []float64     `json:"cross_asset_probs,omitempty"`
 	OptionLTP, PCR                                         *float64
 	OIConfirms, EquityConfirms, EnsembleMode               bool
 	Support, Resistance, ModelAccuracy                     float64

@@ -1,0 +1,345 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap');
+
+:root {
+  --bg-main: #0b0e14;
+  --bg-surface: #151a25;
+  --bg-surface-hover: #1e2433;
+  --border-color: #2a3143;
+  --text-primary: #f0f2f5;
+  --text-secondary: #94a0b8;
+  --text-muted: #64748b;
+  --status-buy: #10b981;
+  --status-sell: #ef4444;
+  --accent-blue: #3b82f6;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Outfit', var(--font-sans);
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+.glass {
+  background: rgba(21, 26, 37, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+/* ── Layout ── */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(11, 14, 20, 0.92);
+  backdrop-filter: blur(8px);
+  z-index: 10;
+}
+
+.header-title {
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #fff, #94a0b8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.25rem;
+}
+
+.controls-bar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dropdown {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  outline: none;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.dropdown:hover {
+  border-color: var(--text-secondary);
+}
+
+/* ── Table ── */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-surface);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: center;
+  font-size: 0.78rem;
+}
+
+th,
+td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid rgba(42, 49, 67, 0.6);
+  border-right: 1px solid rgba(255, 255, 255, 0.03);
+  white-space: nowrap;
+}
+
+th:last-child,
+td:last-child {
+  border-right: none;
+}
+
+th {
+  background-color: rgba(11, 14, 20, 0.7);
+  color: var(--text-secondary);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.th-status {
+  text-align: left;
+  min-width: 90px;
+}
+
+.th-script {
+  text-align: left;
+  min-width: 100px;
+}
+
+tbody tr {
+  transition: var(--transition);
+}
+
+tbody tr:hover {
+  background-color: var(--bg-surface-hover);
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.script-name {
+  text-align: left;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.3px;
+}
+
+.ltp-cell {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.val-positive {
+  color: var(--status-buy);
+  font-weight: 500;
+}
+
+.val-negative {
+  color: var(--status-sell);
+  font-weight: 500;
+}
+
+/* ── Signal Badges — Multi-Level Intensity ── */
+.signal-badge {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-align: center;
+  min-width: 48px;
+  transition: var(--transition);
+}
+
+/* Buy levels — green gradient from subtle to vivid */
+.sig-buy {
+  background: #166534;
+  color: #bbf7d0;
+}
+
+.sig-buy-1 {
+  background: #15803d;
+  color: #dcfce7;
+}
+
+.sig-buy-2 {
+  background: #059669;
+  color: #ecfdf5;
+}
+
+.sig-buy-3 {
+  background: #047857;
+  color: #fff;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.3);
+}
+
+/* Sell levels — red gradient from subtle to vivid */
+.sig-sell {
+  background: #991b1b;
+  color: #fecaca;
+}
+
+.sig-sell-1 {
+  background: #b91c1c;
+  color: #fee2e2;
+}
+
+.sig-sell-2 {
+  background: #dc2626;
+  color: #fff1f2;
+}
+
+.sig-sell-3 {
+  background: #c81e1e;
+  color: #fff;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.3);
+}
+
+/* Neutral */
+.sig-neutral {
+  background: #334155;
+  color: #94a3b8;
+}
+
+/* ── Heatmap ── */
+.heatmap-container {
+  display: grid;
+  gap: 3px;
+  padding: 0.25rem;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+}
+
+.heat-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  border-radius: 4px;
+  color: white;
+  transition: transform 0.15s ease;
+  cursor: pointer;
+  min-height: 48px;
+}
+
+.heat-card:hover {
+  transform: scale(1.08);
+  z-index: 5;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.heat-card .ticker {
+  font-weight: 700;
+  font-size: 0.6rem;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.heat-card .change {
+  font-size: 0.6rem;
+  opacity: 0.9;
+}
+
+/* ── Health Widget ── */
+.health-widget {
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-secondary);
+}
+
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.health-dot.online {
+  background: var(--status-buy);
+  box-shadow: 0 0 8px var(--status-buy);
+}
+
+.health-dot.offline {
+  background: var(--status-sell);
+  box-shadow: 0 0 8px var(--status-sell);
+}
+
+/* ── Loader ── */
+.loader {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  border-top-color: var(--accent-blue);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}

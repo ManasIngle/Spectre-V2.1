@@ -1,0 +1,52 @@
+{
+  "timeframe": "15m",
+  "role": "Swing confirmation (90-min prediction)",
+  "feature_columns": [
+    "feat_rsi",
+    "feat_adx",
+    "feat_di_plus",
+    "feat_di_minus",
+    "feat_di_diff",
+    "feat_macd_hist",
+    "feat_ema_spread",
+    "feat_vwap_dev",
+    "feat_st_direction",
+    "feat_rel_vol",
+    "feat_vol_trend",
+    "feat_roc_6",
+    "feat_roc_12",
+    "feat_bb_pos",
+    "feat_atr_move",
+    "feat_ret_1",
+    "feat_ret_2",
+    "feat_ret_3",
+    "feat_slow_rsi",
+    "feat_slow_macd_hist",
+    "feat_slow_st_dir",
+    "feat_equity_weighted_ret",
+    "feat_equity_advance_pct",
+    "feat_equity_momentum",
+    "feat_hour",
+    "feat_minutes_since_open",
+    "feat_day_of_week",
+    "feat_volatility",
+    "feat_trend_strength",
+    "feat_futures_premium_proxy",
+    "feat_premium_change_rate"
+  ],
+  "class_mapping": {
+    "0": "DOWN",
+    "1": "SIDEWAYS",
+    "2": "UP"
+  },
+  "target_mapping": {
+    "DOWN": -1,
+    "SIDEWAYS": 0,
+    "UP": 1
+  },
+  "accuracy": 0.4746,
+  "n_training_samples": 1100,
+  "n_test_samples": 276,
+  "threshold_pct": 0.12,
+  "forward_bars": 6
+}

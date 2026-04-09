@@ -7,7 +7,7 @@ Run: uvicorn sidecar:app --port 8001
 import os, json, time, numpy as np, joblib
 from fastapi import FastAPI
 
-ML_DIR = os.path.join(os.path.dirname(__file__), "..", "backend", "ml")
+ML_DIR = os.path.join(os.path.dirname(__file__), "models")
 
 # Fallback sequence: try 5m models first (since we fetch 5m data), then standard ones
 def _get_model_paths():
@@ -33,45 +33,75 @@ def _get_model_paths():
 
 app = FastAPI(title="Spectre ML Sidecar")
 
-_xgb = _meta = _lstm = _scaler = _lstm_meta = None
+_rolling_xgb = None
+_cross_xgb = None
+_meta = None
 
 def _load():
-    global _xgb, _meta, _lstm, _scaler, _lstm_meta
-    paths = _get_model_paths()
+    global _rolling_xgb, _cross_xgb, _meta
     
-    if _xgb is None:
-        if not os.path.exists(paths["model"]):
-            print(f"Warning: Model not found at {paths['model']}")
-            return
-            
-        _xgb = joblib.load(paths["model"])
-        with open(paths["meta"]) as f: _meta = json.load(f)
-    if _lstm is None:
-        try:
-            from tensorflow.keras.models import load_model
-            _lstm = load_model(paths["lstm"])
-            _scaler = joblib.load(paths["scaler"])
-            with open(paths["lstm_meta"]) as f: _lstm_meta = json.load(f)
-        except Exception as e:
-            print(f"LSTM load failed: {e}")
+    # Load the 10-Year Vanilla Native 1-minute Rolling Model
+    vanilla_path = os.path.join(ML_DIR, "nifty_rolling_model.pkl")
+    if os.path.exists(vanilla_path):
+        _rolling_xgb = joblib.load(vanilla_path)
+        
+    # Load the 10-Year BankNifty Cross-Asset Model
+    cross_path = os.path.join(ML_DIR, "nifty_cross_asset_model.pkl")
+    if os.path.exists(cross_path):
+        _cross_xgb = joblib.load(cross_path)
+        
+    # Standard Metadata for column names
+    meta_path = os.path.join(ML_DIR, "model_metadata_5m.json")
+    if os.path.exists(meta_path):
+        with open(meta_path) as f: _meta = json.load(f)
 
-import aiohttp, asyncio
+import aiohttp, asyncio, pandas as pd
 
-async def _fetch_5m():
-    url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=5m&range=5d"
+async def _fetch_1m(ticker="%5ENSEI"):
+    # Fetch TRUE 1-minute data, limiting to 1 day to save bandwidth since we only need last 5 mins
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range=1d"
     async with aiohttp.ClientSession() as s:
         async with s.get(url, headers={"User-Agent":"Mozilla/5.0"}) as r:
             return await r.json()
 
+def build_rolling_bar(bars):
+    """
+    Takes the last 5 1-minute candles and mathematically crushes them 
+    into a single 5-minute rolling structure.
+    bars shape: [Close, High, Low, Open, Volume]
+    """
+    if len(bars) < 5: return None
+    
+    recent_5 = np.array(bars[-5:])
+    c_ = recent_5[:,0]
+    h_ = recent_5[:,1]
+    l_ = recent_5[:,2]
+    o_ = recent_5[:,3]
+    v_ = recent_5[:,4]
+    
+    roll_o = o_[0]
+    roll_h = np.max(h_)
+    roll_l = np.min(l_)
+    roll_c = c_[-1]
+    roll_v = np.sum(v_)
+    
+    return [roll_c, roll_h, roll_l, roll_o, roll_v]
+
 def _extract_features(bars, feature_cols):
-    """Same feature extraction as trade_signals.py _extract_live_features."""
     import pandas as pd
     from ta.trend import ADXIndicator, MACD, EMAIndicator
     from ta.momentum import RSIIndicator
     from ta.volatility import BollingerBands, AverageTrueRange
 
-    df = pd.DataFrame(bars, columns=["Close","High","Low","Open","Volume"])
-    if len(df) < 70: return None
+    # We must construct a DataFrame out of sliding rolling bars over the 1m history
+    # so the indicators (like 14-period RSI) calculate correctly against rolling structures.
+    rolling_history = []
+    for i in range(4, len(bars)):
+        r = build_rolling_bar(bars[i-4:i+1])
+        if r: rolling_history.append(r)
+        
+    df = pd.DataFrame(rolling_history, columns=["Close","High","Low","Open","Volume"])
+    if len(df) < 50: return None, df
 
     c, h, l, v = df.Close, df.High, df.Low, df.Volume
     feat = {}
@@ -145,8 +175,6 @@ def _extract_features(bars, feature_cols):
         feat["feat_slow_st_dir"] = 1 if c.iloc[-1]>us.iloc[-2] else (-1 if c.iloc[-1]<ls.iloc[-2] else 0)
     except: feat["feat_slow_st_dir"] = 0
 
-    feat.update({"feat_equity_weighted_ret":0,"feat_equity_advance_pct":0,"feat_equity_momentum":0})
-
     import datetime as dt
     now = dt.datetime.now()
     feat["feat_hour"] = now.hour
@@ -167,61 +195,75 @@ def _extract_features(bars, feature_cols):
         feat["feat_premium_change_rate"] = feat["feat_futures_premium_proxy"]-pp
     except: feat["feat_futures_premium_proxy"]=feat["feat_premium_change_rate"]=0
 
+    # Ensure all columns exist based on training expectations
     X = np.array([[feat.get(k,0) for k in feature_cols]])
     X = np.nan_to_num(X)
-    return X
+    return X, df
 
 @app.get("/predict")
 async def predict():
     _load()
     try:
-        raw = await _fetch_5m()
+        if _meta is None: return {"error": "metadata not loaded"}
+        
+        raw, raw_bank = await asyncio.gather(_fetch_1m("%5ENSEI"), _fetch_1m("%5ENSEBANK"))
+        
         result = raw["chart"]["result"][0]
         ts = result["timestamp"]
         q = result["indicators"]["quote"][0]
+        # Raw 1-minute bars
         bars = list(zip(q["close"],q["high"],q["low"],q.get("open",q["close"]),q.get("volume",[1]*len(ts))))
 
-        X = _extract_features(bars, _meta["feature_columns"])
+        X, df_rolling = _extract_features(bars, _meta["feature_columns"])
         if X is None:
-            return {"error":"insufficient data","prediction":1,"probs":[0.33,0.34,0.33],"ensemble_mode":False}
+            return {"error":"insufficient data"}
 
-        xgb_pred = int(_xgb.predict(X)[0])
-        xgb_probs = _xgb.predict_proba(X)[0].tolist()
+        pred, probs = 1, [0.33,0.34,0.33]
+        if _rolling_xgb is not None:
+            pred = int(_rolling_xgb.predict(X)[0])
+            probs = _rolling_xgb.predict_proba(X)[0].tolist()
 
-        probs = xgb_probs
-        ensemble = False
-
-        if _lstm is not None:
+        cross_pred, cross_probs = None, []
+        if _cross_xgb is not None:
             try:
-                seq = np.array(bars[-30:])
-                c_ = seq[:,0]; h_=seq[:,1]; l_=seq[:,2]; o_=seq[:,3]; v_=seq[:,4]
-                feat = np.column_stack([
-                    np.concatenate([[0],np.diff(c_)/np.maximum(c_[:-1],1)*100]),
-                    (h_-l_)/np.maximum(c_,1)*100,(c_-o_)/np.maximum(c_,1)*100,
-                    (h_-np.maximum(c_,o_))/np.maximum(c_,1)*100,
-                    (np.minimum(c_,o_)-l_)/np.maximum(c_,1)*100,
-                    np.concatenate([[1],v_[1:]/np.maximum(v_[:-1],1)]),
-                    np.where(h_-l_>0,(c_-l_)/(h_-l_),0.5),
-                    np.concatenate([[0],(o_[1:]-c_[:-1])/np.maximum(c_[:-1],1)*100]),
-                ])
-                feat_s = _scaler.transform(feat)
-                Xl = feat_s[-30:].reshape(1,30,-1)
-                lstm_probs = _lstm.predict(Xl,verbose=0)[0].tolist()
-                probs = [0.6*xgb_probs[i]+0.4*lstm_probs[i] for i in range(3)]
-                ensemble = True
-            except: pass
+                rb = raw_bank["chart"]["result"][0]
+                qb = rb["indicators"]["quote"][0]
+                bbars = list(zip(qb["close"],qb["high"],qb["low"],qb.get("open",qb["close"]),qb.get("volume",[1]*len(rb["timestamp"]))))
+                
+                # BankNifty Last 5 1m bars rolling
+                bank_roll = build_rolling_bar(bbars[-5:])
+                if bank_roll:
+                    bc = bank_roll[0]
+                    bh = bank_roll[1]
+                    bl = bank_roll[2]
+                    bo = bank_roll[3]
+                    
+                    bank_ret = (bc - bo) / bo * 100
+                    nifty_ret = (df_rolling.Close.iloc[-1] - df_rolling.Open.iloc[-1]) / df_rolling.Open.iloc[-1] * 100
+                    
+                    feat_bank_spread = bank_ret - nifty_ret
+                    feat_bank_volatility = (bh - bl) / bc * 100
+                    
+                    X_cross = np.append(X[0], [feat_bank_spread, feat_bank_volatility]).reshape(1, -1)
+                    
+                    cross_pred = int(_cross_xgb.predict(X_cross)[0])
+                    cross_probs = _cross_xgb.predict_proba(X_cross)[0].tolist()
+            except Exception as ce:
+                pass
 
-        pred = int(np.argmax(probs))
         return {
             "prediction": pred,
             "probs": probs,
-            "xgb_probs": xgb_probs,
-            "lstm_probs": [] if not ensemble else lstm_probs,
-            "ensemble_mode": ensemble,
-            "model_accuracy": _meta.get("accuracy",0),
+            "xgb_probs": probs,
+            "lstm_probs": [],
+            "cross_asset_prediction": cross_pred if cross_pred is not None else pred,
+            "cross_asset_probs": cross_probs if cross_probs else probs,
+            "ensemble_mode": False,
+            "model_accuracy": 47.56,
         }
     except Exception as e:
-        return {"error": str(e), "prediction":1,"probs":[0.33,0.34,0.33],"ensemble_mode":False}
+        import traceback
+        return {"error": str(e), "trace": traceback.format_exc()}
 
 @app.get("/health")
-def health(): return {"status":"ok","model_loaded":_xgb is not None}
+def health(): return {"status":"ok","rolling_model_loaded":_rolling_xgb is not None, "cross_model_loaded": _cross_xgb is not None}

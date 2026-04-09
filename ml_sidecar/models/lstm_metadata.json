@@ -1,0 +1,26 @@
+{
+  "sequence_length": 30,
+  "n_features": 8,
+  "feature_names": [
+    "return_pct",
+    "hl_range_pct",
+    "oc_body_pct",
+    "upper_shadow_pct",
+    "lower_shadow_pct",
+    "volume_change_ratio",
+    "close_position",
+    "gap_pct"
+  ],
+  "class_mapping": {
+    "0": "DOWN",
+    "1": "SIDEWAYS",
+    "2": "UP"
+  },
+  "accuracy": 0.395,
+  "n_training_samples": 4037,
+  "n_test_samples": 1010,
+  "epochs_trained": 12,
+  "best_val_loss": 1.1,
+  "threshold_pct": 0.15,
+  "forward_bars": 6
+}

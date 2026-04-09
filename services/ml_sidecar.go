@@ -10,10 +10,12 @@ import (
 
 // MLPrediction is the response from the Python ML sidecar.
 type MLPrediction struct {
-Prediction    int        `json:"prediction"`  // 0=DOWN 1=SIDEWAYS 2=UP
+	Prediction    int        `json:"prediction"`  // 0=DOWN 1=SIDEWAYS 2=UP
 	Probs         [3]float64 `json:"probs"`        // [probDown, probSide, probUp]
 	XGBProbs      [3]float64 `json:"xgb_probs"`
 	LSTMProbs     [3]float64 `json:"lstm_probs"`
+	CrossAssetPrediction int `json:"cross_asset_prediction"`
+	CrossAssetProbs [3]float64 `json:"cross_asset_probs"`
 	EnsembleMode  bool       `json:"ensemble_mode"`
 	ModelAccuracy float64    `json:"model_accuracy"`
 	Error         string     `json:"error,omitempty"`

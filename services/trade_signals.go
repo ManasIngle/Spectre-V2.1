@@ -116,11 +116,36 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 		if pred == "DOWN" && *pcr < 0.9 { oiConfirms = true }
 	}
 
-	validUntil := time.Now().Add(30 * time.Minute).Format("03:04 PM")
+	// Dynamic Hold Time (Valid Until) Calculation
+	baseMinutes := 30.0
+	if conf > 55 {
+		baseMinutes = 90.0 // Strong trend conviction
+	} else if conf > 45 {
+		baseMinutes = 60.0 // Moderate conviction
+	} else {
+		baseMinutes = 20.0 // Weak conviction, quick scalp
+	}
+
+	// Adjust for volatility (ATR)
+	// If ATR% > 0.6 (High volatility), market moves fast, cut hold time.
+	if atrPct > 0.6 {
+		baseMinutes *= 0.6
+	} else if atrPct < 0.3 {
+		// Low volatility, takes longer to hit targets
+		baseMinutes *= 1.4
+	}
+
+	holdDuration := time.Duration(baseMinutes) * time.Minute
+	validUntil := time.Now().Add(holdDuration).Format("03:04 PM")
+	
+	// Add it to the detail so the trader sees the exact expected duration
+	stability.Detail = fmt.Sprintf("%s | Est. Hold: %.0f mins", stability.Detail, baseMinutes)
 
 	result := &models.TradeSignal{
 		Signal: stability.StableSignal, RawSignal: rawSig,
+		CrossAssetSignal: classMaps[mlPred.CrossAssetPrediction], CrossAssetPrediction: classMaps[mlPred.CrossAssetPrediction],
 		Prediction: pred, OptionType: optType,
+		CrossAssetProbs: []float64{mlPred.CrossAssetProbs[0] * 100, mlPred.CrossAssetProbs[1] * 100, mlPred.CrossAssetProbs[2] * 100},
 		Strike: strike, NiftySpot: ltp,
 		EntryEst: entry, TargetEst: target, SLEst: sl,
 		TargetNifty: targetNifty, SLNifty: slNifty,
