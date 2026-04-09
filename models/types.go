@@ -50,18 +50,38 @@ type StabilityInfo struct {
 }
 
 type TradeSignal struct {
-	Signal, RawSignal, CrossAssetSignal, Prediction, CrossAssetPrediction, OptionType, ValidUntil string
-	Strike, NiftySpot, EntryEst, TargetEst, SLEst         float64
-	TargetNifty, SLNifty                                   float64
-	Confidence, ProbUp, ProbDown, ProbSideways             float64
-	CrossAssetProbs                                        []float64     `json:"cross_asset_probs,omitempty"`
-	OptionLTP, PCR                                         *float64
-	OIConfirms, EquityConfirms, EnsembleMode               bool
-	Support, Resistance, ModelAccuracy                     float64
-	EquityReturn, EquityAdvPct                             float64
-	KeyFactors                                             []KeyFactor   `json:"key_factors"`
-	Stability                                              StabilityInfo `json:"stability"`
-	Error                                                  string        `json:"error,omitempty"`
+	Signal               string        `json:"signal"`
+	RawSignal            string        `json:"raw_signal"`
+	CrossAssetSignal     string        `json:"CrossAssetSignal"`
+	Prediction           string        `json:"prediction"`
+	CrossAssetPrediction string        `json:"cross_asset_prediction"`
+	OptionType           string        `json:"option_type"`
+	ValidUntil           string        `json:"valid_until"`
+	Strike               float64       `json:"strike"`
+	NiftySpot            float64       `json:"nifty_spot"`
+	EntryEst             float64       `json:"entry_est"`
+	TargetEst            float64       `json:"target_est"`
+	SLEst                float64       `json:"sl_est"`
+	TargetNifty          float64       `json:"target_nifty"`
+	SLNifty              float64       `json:"sl_nifty"`
+	Confidence           float64       `json:"confidence"`
+	ProbUp               float64       `json:"prob_up"`
+	ProbDown             float64       `json:"prob_down"`
+	ProbSideways         float64       `json:"prob_sideways"`
+	CrossAssetProbs      []float64     `json:"cross_asset_probs,omitempty"`
+	OptionLTP            *float64      `json:"option_ltp"`
+	PCR                  *float64      `json:"pcr"`
+	OIConfirms           bool          `json:"oi_confirms"`
+	EquityConfirms       bool          `json:"equity_confirms"`
+	EnsembleMode         bool          `json:"ensemble_mode"`
+	Support              float64       `json:"support"`
+	Resistance           float64       `json:"resistance"`
+	ModelAccuracy        float64       `json:"model_accuracy"`
+	EquityReturn         float64       `json:"equity_return"`
+	EquityAdvPct         float64       `json:"equity_advance_pct"`
+	KeyFactors           []KeyFactor   `json:"key_factors"`
+	Stability            StabilityInfo `json:"stability"`
+	Error                string        `json:"error,omitempty"`
 }
 
 type StabilityStateResp struct {
