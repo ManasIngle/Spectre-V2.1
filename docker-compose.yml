@@ -24,7 +24,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "80:80"
+      - "8241:80"
     restart: unless-stopped
     depends_on:
       - spectre
