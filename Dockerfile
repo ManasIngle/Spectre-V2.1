@@ -11,5 +11,5 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /app/spectre .
-EXPOSE 8000
+EXPOSE 8239
 CMD ["./spectre"]

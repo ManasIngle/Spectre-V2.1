@@ -18,3 +18,13 @@ services:
     restart: unless-stopped
     volumes:
       - ./ml_sidecar/models:/models:ro
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    depends_on:
+      - spectre
