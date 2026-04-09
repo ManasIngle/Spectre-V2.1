@@ -4,7 +4,7 @@ services:
   spectre:
     build: .
     ports:
-      - "8000:8000"
+      - "8239:8239"
     restart: unless-stopped
     environment:
       - GIN_MODE=release
@@ -14,7 +14,7 @@ services:
       context: .
       dockerfile: ml_sidecar/Dockerfile
     ports:
-      - "127.0.0.1:8001:8001"
+      - "127.0.0.1:8240:8240"
     restart: unless-stopped
     volumes:
-      - ../v2-placeholder-30-march/backend/ml:/models:ro
+      - ./ml_sidecar/models:/models:ro

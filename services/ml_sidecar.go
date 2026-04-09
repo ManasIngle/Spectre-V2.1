@@ -27,7 +27,7 @@ var mlClient = &http.Client{Timeout: 8 * time.Second}
 // The sidecar just loads the pkl models and returns probabilities.
 // This is fast (<50ms) because the models stay in memory.
 func FetchMLPrediction() (*MLPrediction, error) {
-	resp, err := mlClient.Get("http://127.0.0.1:8001/predict")
+	resp, err := mlClient.Get("http://127.0.0.1:8240/predict")
 	if err != nil {
 		return nil, fmt.Errorf("ML sidecar unreachable: %v", err)
 	}
