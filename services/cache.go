@@ -38,6 +38,12 @@ func (c *TTLCache) Set(key string, val interface{}, ttl time.Duration) {
 	c.entries[key] = cacheEntry{data: val, expiresAt: time.Now().Add(ttl)}
 }
 
+func (c *TTLCache) Delete(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, key)
+}
+
 func (c *TTLCache) Get(key string) (interface{}, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
