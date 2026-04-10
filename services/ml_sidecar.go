@@ -1,24 +1,39 @@
 package services
 
 import (
-"encoding/json"
-"fmt"
-"io"
-"net/http"
-"time"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
 )
 
 // MLPrediction is the response from the Python ML sidecar.
+type ModelOutput struct {
+	Prediction int        `json:"prediction"`
+	Probs      [3]float64 `json:"probs"`
+	Label      string     `json:"label"`
+	Accuracy   float64    `json:"accuracy"`
+}
+
+type ModelsBreakdown struct {
+	Rolling      ModelOutput  `json:"rolling"`
+	Direction    ModelOutput  `json:"direction"`
+	CrossAsset   ModelOutput  `json:"cross_asset"`
+	OldDirection *ModelOutput `json:"old_direction,omitempty"`
+}
+
 type MLPrediction struct {
-	Prediction    int        `json:"prediction"`  // 0=DOWN 1=SIDEWAYS 2=UP
-	Probs         [3]float64 `json:"probs"`        // [probDown, probSide, probUp]
-	XGBProbs      [3]float64 `json:"xgb_probs"`
-	LSTMProbs     [3]float64 `json:"lstm_probs"`
-	CrossAssetPrediction int `json:"cross_asset_prediction"`
-	CrossAssetProbs [3]float64 `json:"cross_asset_probs"`
-	EnsembleMode  bool       `json:"ensemble_mode"`
-	ModelAccuracy float64    `json:"model_accuracy"`
-	Error         string     `json:"error,omitempty"`
+	Prediction           int             `json:"prediction"`
+	Probs                [3]float64      `json:"probs"`
+	XGBProbs             [3]float64      `json:"xgb_probs"`
+	LSTMProbs            [3]float64      `json:"lstm_probs"`
+	CrossAssetPrediction int             `json:"cross_asset_prediction"`
+	CrossAssetProbs      [3]float64      `json:"cross_asset_probs"`
+	EnsembleMode         bool            `json:"ensemble_mode"`
+	ModelAccuracy        float64         `json:"model_accuracy"`
+	Models               ModelsBreakdown `json:"models"`
+	Error                string          `json:"error,omitempty"`
 }
 
 var mlClient = &http.Client{Timeout: 8 * time.Second}

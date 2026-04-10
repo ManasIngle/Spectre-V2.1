@@ -180,6 +180,16 @@ const TradeSignalsView = () => {
                 </div>
             </div>
 
+            {/* ═══ MODEL BREAKDOWN ROW ═══ */}
+            {data.models && (
+                <div style={{ display: 'grid', gridTemplateColumns: data.models.old_direction ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr', gap: '1rem' }}>
+                    {data.models.rolling && <ModelCard model={data.models.rolling} accent="#6366f1" />}
+                    {data.models.direction && <ModelCard model={data.models.direction} accent="#8b5cf6" />}
+                    {data.models.cross_asset && <ModelCard model={data.models.cross_asset} accent="#eab308" />}
+                    {data.models.old_direction && <ModelCard model={data.models.old_direction} accent="#f97316" />}
+                </div>
+            )}
+
             {/* Disclaimer */}
             <div style={{
                 fontSize: '0.65rem', color: 'var(--text-muted)', textAlign: 'center',
@@ -200,6 +210,32 @@ const LevelBox = ({ label, value, color }) => (
         <div style={{ fontSize: '1.05rem', fontWeight: 700, color }}>{value}</div>
     </div>
 );
+
+const ModelCard = ({ model, accent }) => {
+    const labels = ['DOWN', 'SIDEWAYS', 'UP'];
+    const pred = labels[model.prediction] || 'N/A';
+    const sigColor = pred === 'UP' ? '#10b981' : pred === 'DOWN' ? '#ef4444' : '#94a3b8';
+    return (
+        <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: '1rem 1.2rem', borderTop: `3px solid ${accent}` }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: accent, marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                {model.label}
+            </div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: sigColor, marginBottom: '0.5rem' }}>
+                {model.signal || pred}
+            </div>
+            {model.probs && model.probs.length === 3 && (
+                <>
+                    <ProbBar label="UP" pct={model.probs[2]} color="#10b981" height="3px" />
+                    <ProbBar label="SIDE" pct={model.probs[1]} color="#94a3b8" height="3px" />
+                    <ProbBar label="DOWN" pct={model.probs[0]} color="#ef4444" height="3px" />
+                </>
+            )}
+            <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
+                Acc: {model.accuracy ? (model.accuracy).toFixed(1) : 'N/A'}%
+            </div>
+        </div>
+    );
+};
 
 const ConfidenceRing = ({ value, color }) => {
     const pct = Math.min(value, 100);

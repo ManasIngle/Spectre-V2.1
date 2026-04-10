@@ -1,12 +1,12 @@
 package services
 
 import (
-"fmt"
-"math"
-"time"
+	"fmt"
+	"math"
+	"time"
 
-"spectre/config"
-"spectre/models"
+	"spectre/config"
+	"spectre/models"
 )
 
 var signalCache = NewTTLCache()
@@ -51,11 +51,16 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 
 	if oi != nil {
 		if oi.TotalCEOI > 0 {
-			p := oi.PCR; pcr = &p
+			p := oi.PCR
+			pcr = &p
 		}
 		for _, s := range oi.Strikes {
-			if s.PEOI > int64(support) { support = s.Strike }
-			if s.CEOI > int64(resistance) { resistance = s.Strike }
+			if s.PEOI > int64(support) {
+				support = s.Strike
+			}
+			if s.CEOI > int64(resistance) {
+				resistance = s.Strike
+			}
 		}
 	}
 
@@ -69,7 +74,9 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 
 	atrPct := 0.5
 	if len(bars) > 14 {
-		h := highs(bars); l := lows(bars); c := closes(bars)
+		h := highs(bars)
+		l := lows(bars)
+		c := closes(bars)
 		at := atr(h, l, c, 14)
 		atrPct = at[len(at)-1] / ltp * 100
 	}
@@ -81,7 +88,11 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 
 	if pred == "UP" && conf > 35 {
 		rawSig, optType = "BUY CE", "CE"
-		if conf > 45 { strike = atm } else { strike = atm + 50 }
+		if conf > 45 {
+			strike = atm
+		} else {
+			strike = atm + 50
+		}
 		entry = math.Round(ltp*0.005*10) / 10
 		target = math.Round(entry*1.3*10) / 10
 		sl = math.Round(entry*0.7*10) / 10
@@ -89,7 +100,11 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 		slNifty = math.Round(ltp - expectedMove*0.5)
 	} else if pred == "DOWN" && conf > 35 {
 		rawSig, optType = "BUY PE", "PE"
-		if conf > 45 { strike = atm } else { strike = atm - 50 }
+		if conf > 45 {
+			strike = atm
+		} else {
+			strike = atm - 50
+		}
 		entry = math.Round(ltp*0.005*10) / 10
 		target = math.Round(entry*1.3*10) / 10
 		sl = math.Round(entry*0.7*10) / 10
@@ -102,8 +117,14 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 		for _, s := range oi.Strikes {
 			if int(s.Strike) == int(strike) {
 				var lp float64
-				if optType == "CE" { lp = s.CELTP } else { lp = s.PELTP }
-				if lp > 0 { optionLTP = &lp }
+				if optType == "CE" {
+					lp = s.CELTP
+				} else {
+					lp = s.PELTP
+				}
+				if lp > 0 {
+					optionLTP = &lp
+				}
 				break
 			}
 		}
@@ -112,8 +133,12 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 	// OI confirms?
 	oiConfirms := false
 	if pcr != nil {
-		if pred == "UP" && *pcr > 1.0 { oiConfirms = true }
-		if pred == "DOWN" && *pcr < 0.9 { oiConfirms = true }
+		if pred == "UP" && *pcr > 1.0 {
+			oiConfirms = true
+		}
+		if pred == "DOWN" && *pcr < 0.9 {
+			oiConfirms = true
+		}
 	}
 
 	// Equity momentum from Nifty price action on current bars
@@ -125,10 +150,14 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 			equityReturn = math.Round((last.Close-last.Open)/last.Open*10000) / 100
 		}
 		lookback := 20
-		if lookback > len(bars) { lookback = len(bars) }
+		if lookback > len(bars) {
+			lookback = len(bars)
+		}
 		advCount := 0
 		for _, b := range bars[len(bars)-lookback:] {
-			if b.Close > b.Open { advCount++ }
+			if b.Close > b.Open {
+				advCount++
+			}
 		}
 		equityAdvPct = math.Round(float64(advCount)/float64(lookback)*1000) / 10
 	}
@@ -154,8 +183,23 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 	}
 
 	holdDuration := time.Duration(baseMinutes) * time.Minute
-	validUntil := time.Now().Add(holdDuration).Format("03:04 PM")
-	
+	ist, _ := time.LoadLocation("Asia/Kolkata")
+	nowIST := time.Now().In(ist)
+
+	marketClose := time.Date(nowIST.Year(), nowIST.Month(), nowIST.Day(), 15, 30, 0, 0, ist)
+	validUntilTime := nowIST.Add(holdDuration)
+	if validUntilTime.After(marketClose) {
+		validUntilTime = marketClose
+	}
+	if holdDuration < 5*time.Minute {
+		holdDuration = 5 * time.Minute
+		validUntilTime = nowIST.Add(holdDuration)
+		if validUntilTime.After(marketClose) {
+			validUntilTime = marketClose
+		}
+	}
+	validUntil := validUntilTime.Format("03:04 PM")
+
 	// Add it to the detail so the trader sees the exact expected duration
 	stability.Detail = fmt.Sprintf("%s | Est. Hold: %.0f mins", stability.Detail, baseMinutes)
 
@@ -164,29 +208,72 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 		CrossAssetSignal: classMaps[mlPred.CrossAssetPrediction], CrossAssetPrediction: classMaps[mlPred.CrossAssetPrediction],
 		Prediction: pred, OptionType: optType,
 		CrossAssetProbs: []float64{mlPred.CrossAssetProbs[0] * 100, mlPred.CrossAssetProbs[1] * 100, mlPred.CrossAssetProbs[2] * 100},
-		Strike: strike, NiftySpot: ltp,
+		Strike:          strike, NiftySpot: ltp,
 		EntryEst: entry, TargetEst: target, SLEst: sl,
 		TargetNifty: targetNifty, SLNifty: slNifty,
-		OptionLTP: optionLTP,
+		OptionLTP:  optionLTP,
 		Confidence: math.Round(conf*10) / 10,
-		ProbUp: probUp, ProbDown: probDown, ProbSideways: probSide,
+		ProbUp:     probUp, ProbDown: probDown, ProbSideways: probSide,
 		OIConfirms: oiConfirms, EquityConfirms: equityConfirms, PCR: pcr,
 		EquityReturn: equityReturn, EquityAdvPct: equityAdvPct,
 		Support: support, Resistance: resistance,
 		ModelAccuracy: mlPred.ModelAccuracy, EnsembleMode: mlPred.EnsembleMode,
 		ValidUntil: validUntil, Stability: stability,
 		KeyFactors: buildKeyFactors(mlPred.Probs, atrPct),
+		Models:     buildModelsBreakdown(mlPred),
 	}
 
 	signalCache.Set("signal", result, config.SignalCacheTTL)
 	return result, nil
 }
 
+func buildModelsBreakdown(mlPred *MLPrediction) models.ModelsBreakdown {
+	classMaps := [3]string{"DOWN", "SIDEWAYS", "UP"}
+	toModelOutput := func(mo ModelOutput) models.ModelOutput {
+		sig := "NO TRADE"
+		p := classMaps[mo.Prediction]
+		if p == "UP" && mo.Probs[2]*100 > 35 {
+			sig = "BUY CE"
+		} else if p == "DOWN" && mo.Probs[0]*100 > 35 {
+			sig = "BUY PE"
+		}
+		return models.ModelOutput{
+			Prediction: mo.Prediction,
+			Signal:     sig,
+			Probs:      [3]float64{mo.Probs[0] * 100, mo.Probs[1] * 100, mo.Probs[2] * 100},
+			Label:      mo.Label,
+			Accuracy:   mo.Accuracy,
+		}
+	}
+
+	bd := models.ModelsBreakdown{
+		Rolling:    toModelOutput(mlPred.Models.Rolling),
+		Direction:  toModelOutput(mlPred.Models.Direction),
+		CrossAsset: toModelOutput(mlPred.Models.CrossAsset),
+	}
+
+	if mlPred.Models.OldDirection != nil {
+		old := toModelOutput(*mlPred.Models.OldDirection)
+		bd.OldDirection = &old
+	}
+
+	return bd
+}
+
 func buildKeyFactors(probs [3]float64, atrPct float64) []models.KeyFactor {
 	factors := []models.KeyFactor{
-		{Factor: "Volatility", Value: fmt.Sprintf("%.2f%%", atrPct), Bias: func() string { if atrPct > 0.7 { return "High" }; return "Low" }()},
+		{Factor: "Volatility", Value: fmt.Sprintf("%.2f%%", atrPct), Bias: func() string {
+			if atrPct > 0.7 {
+				return "High"
+			}
+			return "Low"
+		}()},
 	}
-	if probs[2] > 0.4 { factors = append(factors, models.KeyFactor{Factor: "ML Prob UP", Value: fmt.Sprintf("%.1f%%", probs[2]*100), Bias: "Bullish"}) }
-	if probs[0] > 0.4 { factors = append(factors, models.KeyFactor{Factor: "ML Prob DOWN", Value: fmt.Sprintf("%.1f%%", probs[0]*100), Bias: "Bearish"}) }
+	if probs[2] > 0.4 {
+		factors = append(factors, models.KeyFactor{Factor: "ML Prob UP", Value: fmt.Sprintf("%.1f%%", probs[2]*100), Bias: "Bullish"})
+	}
+	if probs[0] > 0.4 {
+		factors = append(factors, models.KeyFactor{Factor: "ML Prob DOWN", Value: fmt.Sprintf("%.1f%%", probs[0]*100), Bias: "Bearish"})
+	}
 	return factors
 }

@@ -8,6 +8,7 @@ services:
     restart: unless-stopped
     environment:
       - GIN_MODE=release
+      - TZ=Asia/Kolkata
 
   ml-sidecar:
     build:
@@ -16,6 +17,8 @@ services:
     ports:
       - "127.0.0.1:8240:8240"
     restart: unless-stopped
+    environment:
+      - TZ=Asia/Kolkata
     volumes:
       - ./ml_sidecar/models:/app/models:ro
 

@@ -34,26 +34,51 @@ def _get_model_paths():
 app = FastAPI(title="Spectre ML Sidecar")
 
 _rolling_xgb = None
+_direction_xgb = None
+_old_direction_xgb = None
 _cross_xgb = None
 _meta = None
+_old_meta = None
 
 def _load():
-    global _rolling_xgb, _cross_xgb, _meta
+    global _rolling_xgb, _direction_xgb, _old_direction_xgb, _cross_xgb, _meta, _old_meta
 
-    # Load the 10-Year Vanilla Native 1-minute Rolling Model
+    # Load the 10-Year Vanilla Native 1-minute Rolling Model (stable signal)
     vanilla_path = os.path.join(ML_DIR, "nifty_rolling_model.pkl")
     if os.path.exists(vanilla_path):
         _rolling_xgb = joblib.load(vanilla_path)
+        print(f"Loaded rolling model: {vanilla_path}")
+
+    # Load the Direction Model (5m preferred — latest stable)
+    paths = _get_model_paths()
+    dir_path = paths["model"]
+    if os.path.exists(dir_path):
+        _direction_xgb = joblib.load(dir_path)
+        print(f"Loaded direction model: {dir_path}")
+
+    # Also load the OLD 1h fallback model separately
+    old_dir_path = os.path.join(ML_DIR, "nifty_direction_model.pkl")
+    if os.path.exists(old_dir_path) and dir_path != old_dir_path:
+        _old_direction_xgb = joblib.load(old_dir_path)
+        print(f"Loaded OLD direction model: {old_dir_path}")
 
     # Load the 10-Year BankNifty Cross-Asset Model
     cross_path = os.path.join(ML_DIR, "nifty_cross_asset_model.pkl")
     if os.path.exists(cross_path):
         _cross_xgb = joblib.load(cross_path)
+        print(f"Loaded cross-asset model: {cross_path}")
 
     # Standard Metadata for column names
     meta_path = os.path.join(ML_DIR, "model_metadata_5m.json")
     if os.path.exists(meta_path):
         with open(meta_path) as f: _meta = json.load(f)
+        print(f"Loaded metadata: {meta_path} ({len(_meta.get('feature_columns',[]))} features)")
+
+    # Old model metadata
+    old_meta_path = os.path.join(ML_DIR, "model_metadata.json")
+    if os.path.exists(old_meta_path):
+        with open(old_meta_path) as f: _old_meta = json.load(f)
+        print(f"Loaded old metadata: {old_meta_path}")
 
 @app.on_event("startup")
 def startup_load():
@@ -179,8 +204,13 @@ def _extract_features(bars, feature_cols):
         feat["feat_slow_st_dir"] = 1 if c.iloc[-1]>us.iloc[-2] else (-1 if c.iloc[-1]<ls.iloc[-2] else 0)
     except: feat["feat_slow_st_dir"] = 0
 
-    import datetime as dt
-    now = dt.datetime.now()
+    import datetime as dt, zoneinfo
+    try:
+        ist = zoneinfo.ZoneInfo("Asia/Kolkata")
+    except Exception:
+        import pytz
+        ist = pytz.timezone("Asia/Kolkata")
+    now = dt.datetime.now(ist)
     feat["feat_hour"] = now.hour
     feat["feat_minutes_since_open"] = (now.hour-9)*60+now.minute-15
     feat["feat_day_of_week"] = now.weekday()
@@ -252,8 +282,39 @@ async def predict():
         if X is None:
             return {"error": "insufficient rolling data for feature extraction"}
 
-        pred = int(_rolling_xgb.predict(X)[0])
-        probs = _rolling_xgb.predict_proba(X)[0].tolist()
+        # Rolling model (stable signal — conservative, anti-whipsaw)
+        rolling_pred = int(_rolling_xgb.predict(X)[0])
+        rolling_probs = _rolling_xgb.predict_proba(X)[0].tolist()
+
+        # Direction model (5m scalp trigger — more reactive)
+        dir_pred, dir_probs = rolling_pred, rolling_probs
+        ensemble_mode = False
+        if _direction_xgb is not None:
+            try:
+                dir_pred = int(_direction_xgb.predict(X)[0])
+                dir_probs = _direction_xgb.predict_proba(X)[0].tolist()
+                ensemble_mode = True
+            except Exception as de:
+                print(f"Direction model prediction error: {de}")
+
+        # OLD 1h direction model (trend bias — 6-hour prediction)
+        old_dir_pred, old_dir_probs = None, None
+        if _old_direction_xgb is not None and _old_meta is not None:
+            try:
+                X_old, _ = _extract_features(bars, _old_meta["feature_columns"])
+                if X_old is not None:
+                    old_dir_pred = int(_old_direction_xgb.predict(X_old)[0])
+                    old_dir_probs = _old_direction_xgb.predict_proba(X_old)[0].tolist()
+            except Exception as ode:
+                print(f"Old direction model prediction error: {ode}")
+
+        # Ensemble: average probabilities from both models when available
+        if ensemble_mode:
+            probs = [(r + d) / 2 for r, d in zip(rolling_probs, dir_probs)]
+            pred = int(np.argmax(probs))
+        else:
+            pred = rolling_pred
+            probs = rolling_probs
 
         cross_pred, cross_probs = None, []
         if _cross_xgb is not None and "chart" in raw_bank and raw_bank["chart"].get("result"):
@@ -289,17 +350,48 @@ async def predict():
                 print(f"Cross-asset prediction error: {ce}\n{traceback.format_exc()}")
 
         model_acc = _meta.get("accuracy", 0) * 100
+        old_model_acc = _old_meta.get("accuracy", 0) * 100 if _old_meta else 0
 
-        return {
+        resp = {
             "prediction": pred,
             "probs": probs,
-            "xgb_probs": probs,
-            "lstm_probs": [],
+            "xgb_probs": rolling_probs,
+            "lstm_probs": dir_probs,
             "cross_asset_prediction": cross_pred if cross_pred is not None else pred,
             "cross_asset_probs": cross_probs if cross_probs else probs,
-            "ensemble_mode": False,
+            "ensemble_mode": ensemble_mode,
             "model_accuracy": round(model_acc, 2),
+            "models": {
+                "rolling": {
+                    "prediction": rolling_pred,
+                    "probs": rolling_probs,
+                    "label": "Rolling (Stable Signal)",
+                    "accuracy": round(_meta.get("accuracy", 0) * 100, 2) if _meta else 0,
+                },
+                "direction": {
+                    "prediction": dir_pred,
+                    "probs": dir_probs,
+                    "label": "Direction (5m Scalp)",
+                    "accuracy": round(model_acc, 2) if ensemble_mode else 0,
+                },
+                "cross_asset": {
+                    "prediction": cross_pred if cross_pred is not None else pred,
+                    "probs": cross_probs if cross_probs else [0, 0, 0],
+                    "label": "Cross-Asset (BankNifty)",
+                    "accuracy": round(_meta.get("accuracy", 0) * 100, 2) if _meta else 0,
+                },
+            },
         }
+
+        if old_dir_pred is not None:
+            resp["models"]["old_direction"] = {
+                "prediction": old_dir_pred,
+                "probs": old_dir_probs,
+                "label": "Old Direction (1h Trend)",
+                "accuracy": round(old_model_acc, 2),
+            }
+
+        return resp
     except Exception as e:
         import traceback
         return {"error": str(e), "trace": traceback.format_exc()}
