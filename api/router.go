@@ -26,9 +26,10 @@ r := gin.Default()
 		api.GET("/dashboard",        handlers.GetDashboard)
 		api.GET("/market-direction", handlers.GetMarketDirection)
 		api.GET("/oi-chain",         handlers.GetOIChain)
-		api.GET("/trade-signals",    handlers.GetTradeSignals)
-		api.GET("/stability-state",  handlers.GetStabilityState)
-		api.POST("/stability-reset", handlers.ResetStability)
+		api.GET("/trade-signals",          handlers.GetTradeSignals)
+		api.GET("/institutional-outlook",  handlers.GetInstitutionalOutlook)
+		api.GET("/stability-state",        handlers.GetStabilityState)
+		api.POST("/stability-reset",       handlers.ResetStability)
 	}
 
 	return r
