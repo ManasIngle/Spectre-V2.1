@@ -39,21 +39,25 @@ _meta = None
 
 def _load():
     global _rolling_xgb, _cross_xgb, _meta
-    
+
     # Load the 10-Year Vanilla Native 1-minute Rolling Model
     vanilla_path = os.path.join(ML_DIR, "nifty_rolling_model.pkl")
     if os.path.exists(vanilla_path):
         _rolling_xgb = joblib.load(vanilla_path)
-        
+
     # Load the 10-Year BankNifty Cross-Asset Model
     cross_path = os.path.join(ML_DIR, "nifty_cross_asset_model.pkl")
     if os.path.exists(cross_path):
         _cross_xgb = joblib.load(cross_path)
-        
+
     # Standard Metadata for column names
     meta_path = os.path.join(ML_DIR, "model_metadata_5m.json")
     if os.path.exists(meta_path):
         with open(meta_path) as f: _meta = json.load(f)
+
+@app.on_event("startup")
+def startup_load():
+    _load()
 
 import aiohttp, asyncio, pandas as pd
 
@@ -202,7 +206,6 @@ def _extract_features(bars, feature_cols):
 
 @app.get("/predict")
 async def predict():
-    _load()
     try:
         if _meta is None: return {"error": "metadata not loaded"}
         

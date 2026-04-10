@@ -37,5 +37,8 @@ func FetchMLPrediction() (*MLPrediction, error) {
 	if err := json.Unmarshal(body, &pred); err != nil {
 		return nil, fmt.Errorf("ML sidecar parse error: %v", err)
 	}
+	if pred.Error != "" {
+		return nil, fmt.Errorf("ML sidecar error: %s", pred.Error)
+	}
 	return &pred, nil
 }
