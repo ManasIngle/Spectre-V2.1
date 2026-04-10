@@ -35,7 +35,7 @@ Because Python is too slow for production-level routing and state management, th
 
 ### A. The Routing Network (Python Sidecar Handover)
 * Go operates the webserver on port `:8239`.
-* When it needs an analysis, it hits an invisible internal API hosted by Python (`:8001`) via `FastAPI`.
+* When it needs an analysis, it hits an invisible internal API hosted by Python (`:8240`) via `FastAPI`.
 * Python concurrently downloads real-time tick data, manually calculates the 33 overlapping indicators natively, runs both AIs simultaneously, and serializes a JSON payload back to Go.
 
 ### B. The Stability Engine (Go Mathematical Wrapper)

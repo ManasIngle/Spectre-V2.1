@@ -23,7 +23,7 @@ type MLPrediction struct {
 
 var mlClient = &http.Client{Timeout: 8 * time.Second}
 
-// FetchMLPrediction calls the Python sidecar at :8001/predict.
+// FetchMLPrediction calls the Python sidecar at :8240/predict.
 // The sidecar just loads the pkl models and returns probabilities.
 // This is fast (<50ms) because the models stay in memory.
 func FetchMLPrediction() (*MLPrediction, error) {

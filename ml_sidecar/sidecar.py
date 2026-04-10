@@ -2,7 +2,7 @@
 Spectre ML Sidecar — lightweight FastAPI server that loads the pkl/keras
 models once and serves predictions via HTTP to the Go main server.
 
-Run: uvicorn sidecar:app --port 8001
+Run: uvicorn sidecar:app --port 8240
 """
 import os, json, time, numpy as np, joblib
 from fastapi import FastAPI

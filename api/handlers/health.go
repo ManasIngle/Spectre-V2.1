@@ -9,7 +9,7 @@ import (
 
 func GetHealth(c *gin.Context) {
 c.JSON(http.StatusOK, gin.H{
-"status":    "ok",
+"status":    "ONLINE",
 "timestamp": time.Now().Format(time.RFC3339),
 "service":   "Spectre Go",
 })

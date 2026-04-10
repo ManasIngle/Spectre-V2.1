@@ -116,6 +116,24 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 		if pred == "DOWN" && *pcr < 0.9 { oiConfirms = true }
 	}
 
+	// Equity momentum from Nifty price action on current bars
+	equityReturn := 0.0
+	equityAdvPct := 0.0
+	if len(bars) > 0 {
+		last := bars[len(bars)-1]
+		if last.Open > 0 {
+			equityReturn = math.Round((last.Close-last.Open)/last.Open*10000) / 100
+		}
+		lookback := 20
+		if lookback > len(bars) { lookback = len(bars) }
+		advCount := 0
+		for _, b := range bars[len(bars)-lookback:] {
+			if b.Close > b.Open { advCount++ }
+		}
+		equityAdvPct = math.Round(float64(advCount)/float64(lookback)*1000) / 10
+	}
+	equityConfirms := (pred == "UP" && equityReturn > 0) || (pred == "DOWN" && equityReturn < 0)
+
 	// Dynamic Hold Time (Valid Until) Calculation
 	baseMinutes := 30.0
 	if conf > 55 {
@@ -152,7 +170,8 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 		OptionLTP: optionLTP,
 		Confidence: math.Round(conf*10) / 10,
 		ProbUp: probUp, ProbDown: probDown, ProbSideways: probSide,
-		OIConfirms: oiConfirms, PCR: pcr,
+		OIConfirms: oiConfirms, EquityConfirms: equityConfirms, PCR: pcr,
+		EquityReturn: equityReturn, EquityAdvPct: equityAdvPct,
 		Support: support, Resistance: resistance,
 		ModelAccuracy: mlPred.ModelAccuracy, EnsembleMode: mlPred.EnsembleMode,
 		ValidUntil: validUntil, Stability: stability,
