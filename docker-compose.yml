@@ -17,7 +17,7 @@ services:
       - "127.0.0.1:8240:8240"
     restart: unless-stopped
     volumes:
-      - ./ml_sidecar/models:/models:ro
+      - ./ml_sidecar/models:/app/models:ro
 
   frontend:
     build:
