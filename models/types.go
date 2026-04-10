@@ -1,43 +1,70 @@
 package models
 
 type OHLCV struct {
-	Time                        int64
-	Open, High, Low, Close, Volume float64
+	Time   int64   `json:"time"`
+	Open   float64 `json:"open"`
+	High   float64 `json:"high"`
+	Low    float64 `json:"low"`
+	Close  float64 `json:"close"`
+	Volume float64 `json:"volume"`
 }
 
 type OptionStrike struct {
-	Strike, CELTP, PELTP        float64
-	CEOI, PEOI, CEOIChg, PEOIChg int64
+	Strike  float64 `json:"strike"`
+	CELTP   float64 `json:"ce_ltp"`
+	PELTP   float64 `json:"pe_ltp"`
+	CEOI    int64   `json:"ce_oi"`
+	PEOI    int64   `json:"pe_oi"`
+	CEOIChg int64   `json:"ce_oi_chg"`
+	PEOIChg int64   `json:"pe_oi_chg"`
 }
 
 type OIChainData struct {
-	Strikes                         []OptionStrike `json:"strikes"`
-	PCR                             float64        `json:"pcr_oi"`
-	TotalCEOI, TotalPEOI            int64
-	TotalCEOIChg, TotalPEOIChg      int64
-	Error                           string         `json:"error,omitempty"`
+	Strikes      []OptionStrike `json:"strikes"`
+	PCR          float64        `json:"pcr_oi"`
+	TotalCEOI    int64          `json:"total_ce_oi"`
+	TotalPEOI    int64          `json:"total_pe_oi"`
+	TotalCEOIChg int64          `json:"total_ce_oi_chg"`
+	TotalPEOIChg int64          `json:"total_pe_oi_chg"`
+	Error        string         `json:"error,omitempty"`
 }
 
 type TFDetail struct {
-	RawScore                                                         int
-	Normalized, LTP, Change, RSI, ADXStrength, MACDHist, Momentum   float64
-	VWAP, EMA9, EMA21                                               float64
-	Signals                                                          map[string]string `json:"signals"`
+	RawScore    int               `json:"raw_score"`
+	Normalized  float64           `json:"normalized"`
+	LTP         float64           `json:"ltp"`
+	Change      float64           `json:"change"`
+	RSI         float64           `json:"rsi"`
+	ADXStrength float64           `json:"adx_strength"`
+	MACDHist    float64           `json:"macd_hist"`
+	Momentum    float64           `json:"momentum"`
+	VWAP        float64           `json:"vwap"`
+	EMA9        float64           `json:"ema9"`
+	EMA21       float64           `json:"ema21"`
+	Signals     map[string]string `json:"signals"`
 }
 
 type OIAnalysis struct {
-	PCR                             float64
-	PCRBias                         string
-	CEOIChange, PEOIChange          int64
-	MaxCEStrike, MaxPEStrike        float64
-	Resistance, Support             float64
+	PCR         float64 `json:"pcr"`
+	PCRBias     string  `json:"pcr_bias"`
+	CEOIChange  int64   `json:"ce_oi_change"`
+	PEOIChange  int64   `json:"pe_oi_change"`
+	MaxCEStrike float64 `json:"max_ce_strike"`
+	MaxPEStrike float64 `json:"max_pe_strike"`
+	Resistance  float64 `json:"resistance"`
+	Support     float64 `json:"support"`
 }
 
 type DirectionResult struct {
-	Score, Confidence, IndicatorScore, OIBias, NiftyLTP float64
-	Direction, SuggestedAction                           string
-	Timeframes                                           map[string]TFDetail `json:"timeframes"`
-	OIAnalysis                                           OIAnalysis          `json:"oi_analysis"`
+	Score           float64             `json:"score"`
+	Confidence      float64             `json:"confidence"`
+	IndicatorScore  float64             `json:"indicator_score"`
+	OIBias          float64             `json:"oi_bias"`
+	NiftyLTP        float64             `json:"nifty_ltp"`
+	Direction       string              `json:"direction"`
+	SuggestedAction string              `json:"action"`
+	Timeframes      map[string]TFDetail `json:"timeframes"`
+	OIAnalysis      OIAnalysis          `json:"oi_analysis"`
 }
 
 type KeyFactor struct {
@@ -109,8 +136,18 @@ type HeatmapItem struct {
 }
 
 type TickerRow struct {
-	Script, Status                                    string
-	LTP, Change                                       float64
-	RSI, MACD, EMACross, VWAP, ST211, ST142, ST103   string
-	Alligator, ADX, Volume                            string
+	Script    string  `json:"script"`
+	Status    string  `json:"status"`
+	LTP       float64 `json:"ltp"`
+	Change    float64 `json:"changePercent"`
+	RSI       string  `json:"rsi"`
+	MACD      string  `json:"macd"`
+	EMACross  string  `json:"ema_cross"`
+	VWAP      string  `json:"vwap"`
+	ST211     string  `json:"st211"`
+	ST142     string  `json:"st142"`
+	ST103     string  `json:"st103"`
+	Alligator string  `json:"alligator"`
+	ADX       string  `json:"adx"`
+	Volume    string  `json:"volume"`
 }
