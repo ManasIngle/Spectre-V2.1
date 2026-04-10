@@ -204,55 +204,91 @@ def _extract_features(bars, feature_cols):
     X = np.nan_to_num(X)
     return X, df
 
+def _clean_bars(closes, highs, lows, opens, volumes):
+    """Filter out bars where any OHLC value is None/NaN."""
+    clean = []
+    for i in range(len(closes)):
+        c = closes[i]
+        h = highs[i]
+        l = lows[i]
+        o = opens[i] if i < len(opens) else c
+        v = volumes[i] if i < len(volumes) else 1
+        if c is None or h is None or l is None or o is None:
+            continue
+        if v is None:
+            v = 1
+        clean.append((float(c), float(h), float(l), float(o), float(v)))
+    return clean
+
 @app.get("/predict")
 async def predict():
     try:
-        if _meta is None: return {"error": "metadata not loaded"}
-        
+        if _rolling_xgb is None:
+            return {"error": "rolling model not loaded — check /app/models/nifty_rolling_model.pkl"}
+        if _meta is None:
+            return {"error": "metadata not loaded — check /app/models/model_metadata_5m.json"}
+
         raw, raw_bank = await asyncio.gather(_fetch_1m("%5ENSEI"), _fetch_1m("%5ENSEBANK"))
-        
+
+        if "chart" not in raw or not raw["chart"].get("result"):
+            return {"error": "Yahoo Finance returned no Nifty data"}
+
         result = raw["chart"]["result"][0]
-        ts = result["timestamp"]
+        ts = result.get("timestamp", [])
         q = result["indicators"]["quote"][0]
-        # Raw 1-minute bars
-        bars = list(zip(q["close"],q["high"],q["low"],q.get("open",q["close"]),q.get("volume",[1]*len(ts))))
+
+        bars = _clean_bars(
+            q.get("close", []),
+            q.get("high", []),
+            q.get("low", []),
+            q.get("open", q.get("close", [])),
+            q.get("volume", [1] * len(ts))
+        )
+
+        if len(bars) < 55:
+            return {"error": f"insufficient bars from Yahoo: {len(bars)} (need 55+)"}
 
         X, df_rolling = _extract_features(bars, _meta["feature_columns"])
         if X is None:
-            return {"error":"insufficient data"}
+            return {"error": "insufficient rolling data for feature extraction"}
 
-        pred, probs = 1, [0.33,0.34,0.33]
-        if _rolling_xgb is not None:
-            pred = int(_rolling_xgb.predict(X)[0])
-            probs = _rolling_xgb.predict_proba(X)[0].tolist()
+        pred = int(_rolling_xgb.predict(X)[0])
+        probs = _rolling_xgb.predict_proba(X)[0].tolist()
 
         cross_pred, cross_probs = None, []
-        if _cross_xgb is not None:
+        if _cross_xgb is not None and "chart" in raw_bank and raw_bank["chart"].get("result"):
             try:
                 rb = raw_bank["chart"]["result"][0]
                 qb = rb["indicators"]["quote"][0]
-                bbars = list(zip(qb["close"],qb["high"],qb["low"],qb.get("open",qb["close"]),qb.get("volume",[1]*len(rb["timestamp"]))))
-                
-                # BankNifty Last 5 1m bars rolling
-                bank_roll = build_rolling_bar(bbars[-5:])
-                if bank_roll:
-                    bc = bank_roll[0]
-                    bh = bank_roll[1]
-                    bl = bank_roll[2]
-                    bo = bank_roll[3]
-                    
-                    bank_ret = (bc - bo) / bo * 100
-                    nifty_ret = (df_rolling.Close.iloc[-1] - df_rolling.Open.iloc[-1]) / df_rolling.Open.iloc[-1] * 100
-                    
-                    feat_bank_spread = bank_ret - nifty_ret
-                    feat_bank_volatility = (bh - bl) / bc * 100
-                    
-                    X_cross = np.append(X[0], [feat_bank_spread, feat_bank_volatility]).reshape(1, -1)
-                    
-                    cross_pred = int(_cross_xgb.predict(X_cross)[0])
-                    cross_probs = _cross_xgb.predict_proba(X_cross)[0].tolist()
+                bbars = _clean_bars(
+                    qb.get("close", []),
+                    qb.get("high", []),
+                    qb.get("low", []),
+                    qb.get("open", qb.get("close", [])),
+                    qb.get("volume", [1] * len(rb.get("timestamp", [])))
+                )
+
+                if len(bbars) >= 5:
+                    bank_roll = build_rolling_bar(bbars[-5:])
+                    if bank_roll:
+                        bc, bh, bl, bo = bank_roll[0], bank_roll[1], bank_roll[2], bank_roll[3]
+
+                        if bo > 0 and bc > 0 and df_rolling.Open.iloc[-1] > 0:
+                            bank_ret = (bc - bo) / bo * 100
+                            nifty_ret = (df_rolling.Close.iloc[-1] - df_rolling.Open.iloc[-1]) / df_rolling.Open.iloc[-1] * 100
+
+                            feat_bank_spread = bank_ret - nifty_ret
+                            feat_bank_volatility = (bh - bl) / bc * 100
+
+                            X_cross = np.append(X[0], [feat_bank_spread, feat_bank_volatility]).reshape(1, -1)
+
+                            cross_pred = int(_cross_xgb.predict(X_cross)[0])
+                            cross_probs = _cross_xgb.predict_proba(X_cross)[0].tolist()
             except Exception as ce:
-                pass
+                import traceback
+                print(f"Cross-asset prediction error: {ce}\n{traceback.format_exc()}")
+
+        model_acc = _meta.get("accuracy", 0) * 100
 
         return {
             "prediction": pred,
@@ -262,7 +298,7 @@ async def predict():
             "cross_asset_prediction": cross_pred if cross_pred is not None else pred,
             "cross_asset_probs": cross_probs if cross_probs else probs,
             "ensemble_mode": False,
-            "model_accuracy": 47.56,
+            "model_accuracy": round(model_acc, 2),
         }
     except Exception as e:
         import traceback
