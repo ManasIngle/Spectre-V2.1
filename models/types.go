@@ -40,13 +40,24 @@ type DirectionResult struct {
 	OIAnalysis                                           OIAnalysis          `json:"oi_analysis"`
 }
 
-type KeyFactor struct{ Factor, Value, Bias string }
+type KeyFactor struct {
+	Factor string `json:"factor"`
+	Value  string `json:"value"`
+	Bias   string `json:"bias"`
+}
 
 type StabilityInfo struct {
-	StableSignal, StableDirection, Status, RawDirection, Detail string
-	ConvictionOK                                                 bool
-	ProbGap, CooldownRemaining                                   float64
-	FlipsPrevented, ConfirmedSignals, ConfirmedFlips             int
+	StableSignal      string  `json:"stable_signal"`
+	StableDirection   string  `json:"stable_direction"`
+	Status            string  `json:"status"`
+	RawDirection      string  `json:"raw_direction"`
+	Detail            string  `json:"detail"`
+	ConvictionOK      bool    `json:"conviction_ok"`
+	ProbGap           float64 `json:"prob_gap"`
+	CooldownRemaining float64 `json:"cooldown_remaining"`
+	FlipsPrevented    int     `json:"flips_prevented"`
+	ConfirmedSignals  int     `json:"confirmed_signals"`
+	ConfirmedFlips    int     `json:"confirmed_flips"`
 }
 
 type TradeSignal struct {
