@@ -167,3 +167,24 @@ type TickerRow struct {
 	ADX       string  `json:"adx"`
 	Volume    string  `json:"volume"`
 }
+
+type MorningSignal struct {
+	Prediction      string  `json:"prediction"`
+	Confidence      float64 `json:"confidence"`
+	FilteredConf    float64 `json:"filtered_confidence"`
+	ProbGap         float64 `json:"prob_gap"`
+	RawSignal       string  `json:"raw_signal"`
+	OptionType      string  `json:"option_type"`
+	NiftySpot       float64 `json:"nifty_spot"`
+	PrevDayClose    float64 `json:"prev_day_close"`
+	TodayOpen       float64 `json:"today_open"`
+	GapPct          float64 `json:"gap_pct"`
+	GapType         string  `json:"gap_type"`
+	GapSeverity     string  `json:"gap_severity"`
+	GapFilter       string  `json:"gap_filter"`
+	PrevDayTrend    string  `json:"prev_day_trend"`
+	ModelAccuracy   float64 `json:"model_accuracy"`
+	GeneratedAt     string  `json:"generated_at"`
+	ValidForMinutes int     `json:"valid_for_minutes"`
+	Error           string  `json:"error,omitempty"`
+}

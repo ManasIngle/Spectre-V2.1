@@ -20,14 +20,13 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 	// Fetch Nifty 5m data for live LTP
 	bars, err := FetchOHLCV(config.NiftyTicker, "5m", "5d", config.CacheTTLFast)
 	if err != nil || len(bars) == 0 {
-		return &models.TradeSignal{Error: "cannot fetch Nifty data", Signal: "NO TRADE", RawSignal: "NO TRADE"}, nil
+		return nil, fmt.Errorf("cannot fetch Nifty data: %w", err)
 	}
 	ltp := bars[len(bars)-1].Close
 
-	// Fetch ML prediction from Python sidecar
 	mlPred, err := FetchMLPrediction()
 	if err != nil {
-		return &models.TradeSignal{Error: err.Error(), Signal: "NO TRADE", RawSignal: "NO TRADE", NiftySpot: ltp}, nil
+		return nil, fmt.Errorf("ML prediction failed: %w", err)
 	}
 
 	// Fetch direction engine score for stability cross-check
@@ -54,11 +53,14 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 			p := oi.PCR
 			pcr = &p
 		}
+		var maxPEOI, maxCEOI int64
 		for _, s := range oi.Strikes {
-			if s.PEOI > int64(support) {
+			if s.PEOI > maxPEOI {
+				maxPEOI = s.PEOI
 				support = s.Strike
 			}
-			if s.CEOI > int64(resistance) {
+			if s.CEOI > maxCEOI {
+				maxCEOI = s.CEOI
 				resistance = s.Strike
 			}
 		}
@@ -66,8 +68,12 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 
 	// Build raw signal
 	classMaps := [3]string{"DOWN", "SIDEWAYS", "UP"}
-	pred := classMaps[mlPred.Prediction]
-	conf := mlPred.Probs[mlPred.Prediction] * 100
+	predIdx := mlPred.Prediction
+	if predIdx < 0 || predIdx > 2 {
+		return &models.TradeSignal{Error: fmt.Sprintf("invalid prediction class: %d", predIdx), Signal: "NO TRADE", RawSignal: "NO TRADE", NiftySpot: ltp}, nil
+	}
+	pred := classMaps[predIdx]
+	conf := mlPred.Probs[predIdx] * 100
 	probDown := mlPred.Probs[0] * 100
 	probSide := mlPred.Probs[1] * 100
 	probUp := mlPred.Probs[2] * 100
@@ -183,7 +189,10 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 	}
 
 	holdDuration := time.Duration(baseMinutes) * time.Minute
-	ist, _ := time.LoadLocation("Asia/Kolkata")
+	ist, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		ist = time.FixedZone("IST", 5*3600+1800) // Fallback to explicitly defined +05:30 offset
+	}
 	nowIST := time.Now().In(ist)
 
 	marketClose := time.Date(nowIST.Year(), nowIST.Month(), nowIST.Day(), 15, 30, 0, 0, ist)
@@ -203,9 +212,14 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 	// Add it to the detail so the trader sees the exact expected duration
 	stability.Detail = fmt.Sprintf("%s | Est. Hold: %.0f mins", stability.Detail, baseMinutes)
 
+	crossIdx := mlPred.CrossAssetPrediction
+	if crossIdx < 0 || crossIdx > 2 {
+		crossIdx = predIdx
+	}
+
 	result := &models.TradeSignal{
 		Signal: stability.StableSignal, RawSignal: rawSig,
-		CrossAssetSignal: classMaps[mlPred.CrossAssetPrediction], CrossAssetPrediction: classMaps[mlPred.CrossAssetPrediction],
+		CrossAssetSignal: classMaps[crossIdx], CrossAssetPrediction: classMaps[crossIdx],
 		Prediction: pred, OptionType: optType,
 		CrossAssetProbs: []float64{mlPred.CrossAssetProbs[0] * 100, mlPred.CrossAssetProbs[1] * 100, mlPred.CrossAssetProbs[2] * 100},
 		Strike:          strike, NiftySpot: ltp,

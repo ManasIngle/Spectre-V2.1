@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 
 const TradeSignalsView = () => {
     const [data, setData] = useState(null);
+    const [morning, setMorning] = useState(null);
     const [loading, setLoading] = useState(true);
 
     const fetchSignals = useCallback(async () => {
@@ -15,11 +16,23 @@ const TradeSignalsView = () => {
         setLoading(false);
     }, []);
 
+    const fetchMorning = useCallback(async () => {
+        try {
+            const res = await fetch('/api/morning-signal');
+            const json = await res.json();
+            setMorning(json);
+        } catch (_) {
+            setMorning(null);
+        }
+    }, []);
+
     useEffect(() => {
         fetchSignals();
+        fetchMorning();
         const id = setInterval(fetchSignals, 30000);
-        return () => clearInterval(id);
-    }, [fetchSignals]);
+        const mId = setInterval(fetchMorning, 60000);
+        return () => { clearInterval(id); clearInterval(mId); };
+    }, [fetchSignals, fetchMorning]);
 
     if (loading && !data) {
         return <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>Running ML model inference...</div>;
@@ -98,7 +111,7 @@ const TradeSignalsView = () => {
                     <div style={{ textAlign: 'center', minWidth: '100px' }}>
                         <ConfidenceRing value={data.confidence} color={mainColor} />
                         <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                            Model Acc: {(data.model_accuracy * 100).toFixed(1)}%
+                            Model Acc: {data.model_accuracy.toFixed(1)}%
                         </div>
                     </div>
                 </div>
@@ -190,12 +203,52 @@ const TradeSignalsView = () => {
                 </div>
             )}
 
+            {/* ═══ MORNING OPENING SIGNAL ═══ */}
+            {morning && morning.raw_signal && morning.raw_signal !== 'NOT YET' && morning.raw_signal !== 'PENDING' && (
+                <div className="glass" style={{
+                    borderRadius: 'var(--radius-lg)', overflow: 'hidden',
+                    borderLeft: `5px solid ${morning.gap_filter === 'SKIP' ? '#ef4444' : morning.gap_filter === 'CAUTION' ? '#f59e0b' : '#10b981'}`,
+                }}>
+                    <div style={{ padding: '1rem 1.5rem', display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+                        <div style={{ textAlign: 'center', minWidth: '160px' }}>
+                            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' }}>
+                                Morning Opening Signal
+                            </div>
+                            <div style={{
+                                fontSize: '1.6rem', fontWeight: 800,
+                                color: morning.raw_signal.includes('CE') ? '#10b981' : morning.raw_signal.includes('PE') ? '#ef4444' : '#94a3b8',
+                            }}>
+                                {morning.raw_signal}
+                            </div>
+                            {morning.option_type !== '-' && (
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                    Spot: {morning.nifty_spot} | Prev Close: {morning.prev_day_close}
+                                </div>
+                            )}
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', flex: 1 }}>
+                            <LevelBox label="Confidence" value={`${morning.confidence.toFixed(1)}%`} color={morning.confidence > 45 ? '#10b981' : '#f59e0b'} />
+                            <LevelBox label="Filtered Conf" value={`${morning.filtered_confidence.toFixed(1)}%`} color="#94a3b8" />
+                            <LevelBox label="Prob Gap" value={`${morning.prob_gap.toFixed(1)}%`} color="#94a3b8" />
+                            <LevelBox label="Gap" value={`${morning.gap_pct > 0 ? '+' : ''}${morning.gap_pct.toFixed(2)}%`} color={Math.abs(morning.gap_pct) > 0.8 ? '#ef4444' : Math.abs(morning.gap_pct) > 0.4 ? '#f59e0b' : '#10b981'} />
+                            <LevelBox label="Gap Type" value={morning.gap_type} color={morning.gap_severity === 'high' ? '#ef4444' : morning.gap_severity === 'medium' ? '#f59e0b' : '#10b981'} />
+                            <LevelBox label="Filter" value={morning.gap_filter} color={morning.gap_filter === 'SKIP' ? '#ef4444' : morning.gap_filter === 'CAUTION' ? '#f59e0b' : '#10b981'} />
+                            <LevelBox label="Prev Day" value={morning.prev_day_trend} color={morning.prev_day_trend === 'BULLISH' ? '#10b981' : morning.prev_day_trend === 'BEARISH' ? '#ef4444' : '#94a3b8'} />
+                            <LevelBox label="Model Acc" value={`${morning.model_accuracy}%`} color="var(--text-primary)" />
+                        </div>
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                            {morning.generated_at} | Valid for {morning.valid_for_minutes} min
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Disclaimer */}
             <div style={{
                 fontSize: '0.65rem', color: 'var(--text-muted)', textAlign: 'center',
                 padding: '0.5rem', opacity: 0.6,
             }}>
-                This is an ML-generated signal for educational purposes only. Model accuracy: {(data.model_accuracy * 100).toFixed(1)}%. Always use proper risk management. Past performance does not guarantee future results.
+                This is an ML-generated signal for educational purposes only.                 Model accuracy: {data.model_accuracy.toFixed(1)}%. Always use proper risk management. Past performance does not guarantee future results.
             </div>
         </div>
     );

@@ -3,7 +3,6 @@ package services
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 )
@@ -38,6 +37,15 @@ type MLPrediction struct {
 
 var mlClient = &http.Client{Timeout: 8 * time.Second}
 
+func CheckSidecarHealth() (bool, error) {
+	resp, err := mlClient.Get("http://ml-sidecar:8240/health")
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK, nil
+}
+
 // FetchMLPrediction calls the Python sidecar at :8240/predict.
 // The sidecar just loads the pkl models and returns probabilities.
 // This is fast (<50ms) because the models stay in memory.
@@ -46,8 +54,14 @@ func FetchMLPrediction() (*MLPrediction, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ML sidecar unreachable: %v", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("ML sidecar returned HTTP %d", resp.StatusCode)
+	}
+	body, err := readBody(resp, 1<<20)
+	if err != nil {
+		return nil, fmt.Errorf("ML sidecar read error: %w", err)
+	}
 	var pred MLPrediction
 	if err := json.Unmarshal(body, &pred); err != nil {
 		return nil, fmt.Errorf("ML sidecar parse error: %v", err)

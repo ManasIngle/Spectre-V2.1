@@ -1,15 +1,15 @@
 package services
 
 import (
-"fmt"
-"sync"
-"time"
+	"fmt"
+	"sync"
+	"time"
 
-"spectre/models"
+	"spectre/models"
 )
 
 const (
-minTopProb        = 0.42
+	minTopProb        = 0.42
 	minProbGap        = 0.08
 	persistenceCount  = 3
 	hysteresisMargin  = 0.12
@@ -19,19 +19,19 @@ minTopProb        = 0.42
 )
 
 type stabilityState struct {
-	confirmedDir    string
-	confirmedAt     time.Time
-	pendingDir      string
-	pendingCount    int
-	flipPendingDir  string
-	flipPendingCnt  int
-	cooldownUntil   time.Time
-	lastFlipTime    time.Time
-	totalRaw        int
-	flipsBlocked    int
-	confirmedSigs   int
-	confirmedFlips  int
-	history         []histEntry
+	confirmedDir   string
+	confirmedAt    time.Time
+	pendingDir     string
+	pendingCount   int
+	flipPendingDir string
+	flipPendingCnt int
+	cooldownUntil  time.Time
+	lastFlipTime   time.Time
+	totalRaw       int
+	flipsBlocked   int
+	confirmedSigs  int
+	confirmedFlips int
+	history        []histEntry
 }
 
 type histEntry struct {
@@ -58,14 +58,24 @@ func ProcessPrediction(rawPred int, probs [3]float64, dirScore *float64) models.
 
 	// Record history (keep last 50)
 	st.history = append(st.history, histEntry{t: now, dir: dirStrs[rawPred], probs: probs})
-	if len(st.history) > 50 { st.history = st.history[1:] }
+	if len(st.history) > 50 {
+		st.history = st.history[1:]
+	}
 
 	// Step 1: Conviction filter
 	topIdx := 0
-	for i := 1; i < 3; i++ { if probs[i] > probs[topIdx] { topIdx = i } }
+	for i := 1; i < 3; i++ {
+		if probs[i] > probs[topIdx] {
+			topIdx = i
+		}
+	}
 	topProb := probs[topIdx]
 	secondProb := 0.0
-	for i, p := range probs { if i != topIdx && p > secondProb { secondProb = p } }
+	for i, p := range probs {
+		if i != topIdx && p > secondProb {
+			secondProb = p
+		}
+	}
 	gap := topProb - secondProb
 
 	if topProb < minTopProb || gap < minProbGap {
@@ -77,7 +87,7 @@ func ProcessPrediction(rawPred int, probs [3]float64, dirScore *float64) models.
 
 	// Step 2: Direction Engine cross-check (veto)
 	if dirScore != nil {
-		if convDir == "UP" && *dirScore < -20 || convDir == "DOWN" && *dirScore > 20 {
+		if (convDir == "UP" && *dirScore < -20) || (convDir == "DOWN" && *dirScore > 20) {
 			st.flipsBlocked++
 			return buildResult(st, "VETOED", convDir,
 				fmt.Sprintf("DirEngine veto: ML=%s score=%.1f", convDir, *dirScore), gap)
@@ -93,10 +103,18 @@ func ProcessPrediction(rawPred int, probs [3]float64, dirScore *float64) models.
 
 	// Step 4: No confirmed direction — persistence check
 	if st.confirmedDir == "" {
-		if convDir == st.pendingDir { st.pendingCount++ } else { st.pendingDir = convDir; st.pendingCount = 1 }
+		if convDir == st.pendingDir {
+			st.pendingCount++
+		} else {
+			st.pendingDir = convDir
+			st.pendingCount = 1
+		}
 		if st.pendingCount >= persistenceCount {
-			st.confirmedDir = convDir; st.confirmedAt = now
-			st.confirmedSigs++; st.pendingDir = ""; st.pendingCount = 0
+			st.confirmedDir = convDir
+			st.confirmedAt = now
+			st.confirmedSigs++
+			st.pendingDir = ""
+			st.pendingCount = 0
 			return buildResult(st, "STABLE", convDir, fmt.Sprintf("Confirmed %s after %d reads", convDir, persistenceCount), gap)
 		}
 		return buildResult(st, "CONFIRMING", convDir,
@@ -105,18 +123,24 @@ func ProcessPrediction(rawPred int, probs [3]float64, dirScore *float64) models.
 
 	// Step 5: Holding confirmed direction
 	if convDir == st.confirmedDir || convDir == "SIDEWAYS" {
-		st.flipPendingDir = ""; st.flipPendingCnt = 0
+		st.flipPendingDir = ""
+		st.flipPendingCnt = 0
 		return buildResult(st, "STABLE", st.confirmedDir, fmt.Sprintf("Holding %s", st.confirmedDir), gap)
 	}
 
 	// Step 6: Opposing direction — hysteresis
 	confirmedIdx := 0
-	for i, d := range dirStrs { if d == st.confirmedDir { confirmedIdx = i } }
+	for i, d := range dirStrs {
+		if d == st.confirmedDir {
+			confirmedIdx = i
+		}
+	}
 	flipMargin := probs[topIdx] - probs[confirmedIdx]
 
 	if flipMargin < hysteresisMargin {
 		st.flipsBlocked++
-		st.flipPendingDir = ""; st.flipPendingCnt = 0
+		st.flipPendingDir = ""
+		st.flipPendingCnt = 0
 		return buildResult(st, "STABLE", st.confirmedDir,
 			fmt.Sprintf("Flip BLOCKED: %s margin=%.1f%%<%.0f%%", convDir, flipMargin*100, hysteresisMargin*100), gap)
 	}
@@ -124,22 +148,33 @@ func ProcessPrediction(rawPred int, probs [3]float64, dirScore *float64) models.
 	// Instant flip?
 	if flipMargin >= instantFlipMargin {
 		oldDir := st.confirmedDir
-		st.confirmedDir = convDir; st.confirmedAt = now
+		st.confirmedDir = convDir
+		st.confirmedAt = now
 		st.cooldownUntil = now.Add(cooldownSecs)
-		st.confirmedFlips++; st.confirmedSigs++
-		st.flipPendingDir = ""; st.flipPendingCnt = 0
+		st.confirmedFlips++
+		st.confirmedSigs++
+		st.flipPendingDir = ""
+		st.flipPendingCnt = 0
 		return buildResult(st, "FLIPPED", convDir,
 			fmt.Sprintf("INSTANT FLIP %s→%s margin=%.1f%%", oldDir, convDir, flipMargin*100), gap)
 	}
 
 	// Normal hysteresis count
-	if convDir == st.flipPendingDir { st.flipPendingCnt++ } else { st.flipPendingDir = convDir; st.flipPendingCnt = 1 }
+	if convDir == st.flipPendingDir {
+		st.flipPendingCnt++
+	} else {
+		st.flipPendingDir = convDir
+		st.flipPendingCnt = 1
+	}
 	if st.flipPendingCnt >= hysteresisConsec {
 		oldDir := st.confirmedDir
-		st.confirmedDir = convDir; st.confirmedAt = now
+		st.confirmedDir = convDir
+		st.confirmedAt = now
 		st.cooldownUntil = now.Add(cooldownSecs)
-		st.confirmedFlips++; st.confirmedSigs++
-		st.flipPendingDir = ""; st.flipPendingCnt = 0
+		st.confirmedFlips++
+		st.confirmedSigs++
+		st.flipPendingDir = ""
+		st.flipPendingCnt = 0
 		return buildResult(st, "FLIPPED", convDir,
 			fmt.Sprintf("FLIP %s→%s margin=%.1f%%", oldDir, convDir, flipMargin*100), gap)
 	}
@@ -150,8 +185,10 @@ func ProcessPrediction(rawPred int, probs [3]float64, dirScore *float64) models.
 
 func dirToSignal(dir string) string {
 	switch dir {
-	case "UP":   return "BUY CE"
-	case "DOWN": return "BUY PE"
+	case "UP":
+		return "BUY CE"
+	case "DOWN":
+		return "BUY PE"
 	}
 	return "NO TRADE"
 }
@@ -176,12 +213,14 @@ func GetStabilityState() models.StabilityStateResp {
 	defer stMu.Unlock()
 	st := stState
 	rate := 0.0
-	if st.totalRaw > 0 { rate = float64(st.flipsBlocked) / float64(st.totalRaw) * 100 }
+	if st.totalRaw > 0 {
+		rate = float64(st.flipsBlocked) / float64(st.totalRaw) * 100
+	}
 	return models.StabilityStateResp{
 		ConfirmedDirection: st.confirmedDir, PendingDirection: st.pendingDir,
-		ConfirmedAt: float64(st.confirmedAt.UnixNano()) / 1e9,
+		ConfirmedAt:   float64(st.confirmedAt.UnixNano()) / 1e9,
 		CooldownUntil: float64(st.cooldownUntil.UnixNano()) / 1e9,
-		PendingCount: st.pendingCount, TotalRaw: st.totalRaw,
+		PendingCount:  st.pendingCount, TotalRaw: st.totalRaw,
 		FlipsPrevented: st.flipsBlocked, ConfirmedSignals: st.confirmedSigs,
 		ConfirmedFlips: st.confirmedFlips, FlipPreventionRate: rate,
 		HistoryDepth: len(st.history),

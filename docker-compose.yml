@@ -9,6 +9,16 @@ services:
     environment:
       - GIN_MODE=release
       - TZ=Asia/Kolkata
+      - RESET_KEY=spectre-reset-2024
+    depends_on:
+      ml-sidecar:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8239/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   ml-sidecar:
     build:
@@ -21,6 +31,12 @@ services:
       - TZ=Asia/Kolkata
     volumes:
       - ./ml_sidecar/models:/app/models:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8240/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   frontend:
     build:
@@ -28,4 +44,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
-      - spectre
+      spectre:
+        condition: service_healthy
+      ml-sidecar:
+        condition: service_healthy

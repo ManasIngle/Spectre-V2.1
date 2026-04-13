@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 	"time"
-	
+
 	"spectre/models"
 )
 
@@ -20,25 +20,30 @@ func StartSystemCron() {
 			log.Println("Timezone error, using local for cron:", err)
 			loc = time.Local
 		}
-		
+
 		log.Println("System Caching Cron initialized (09:00 - 15:30 IST)")
+		log.Println("Morning Signal Cron initialized (09:09, 09:18 IST)")
 
 		for {
 			<-ticker.C
 			now := time.Now().In(loc)
-			
+
 			timeStr := fmt.Sprintf("%02d:%02d", now.Hour(), now.Minute())
-			
+
+			if timeStr == "09:09" || timeStr == "09:18" {
+				log.Println("Morning Signal trigger at", timeStr)
+				go RefreshMorningSignal()
+			}
+
 			if timeStr >= "09:00" && timeStr <= "15:30" {
-				// Bypass cache and force a complete fetch loop
 				signalCache.Delete("signal")
-				
+
 				signal, err := GenerateTradeSignal()
 				if err != nil {
 					log.Printf("Cron Error generating signal: %v", err)
 					continue
 				}
-				
+
 				logSignalToCSV(now, signal)
 			}
 		}
@@ -60,7 +65,7 @@ func logSignalToCSV(t time.Time, s *models.TradeSignal) {
 	info, _ := file.Stat()
 	if info.Size() == 0 {
 		writer.Write([]string{
-			"Timestamp", "NiftySpot", "RawSignal", "StableSignal", "CrossAssetSignal", 
+			"Timestamp", "NiftySpot", "RawSignal", "StableSignal", "CrossAssetSignal",
 			"Confidence", "TargetEst", "ValidUntil",
 		})
 	}
@@ -75,7 +80,7 @@ func logSignalToCSV(t time.Time, s *models.TradeSignal) {
 		fmt.Sprintf("%.2f", s.TargetEst),
 		s.ValidUntil,
 	}
-	
+
 	if err := writer.Write(record); err != nil {
 		log.Println("Error writing cron log:", err)
 	}

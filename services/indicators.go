@@ -1,16 +1,16 @@
 package services
 
 import (
-"fmt"
-"math"
+	"fmt"
+	"math"
 
-"spectre/models"
+	"spectre/models"
 )
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func closes(bars []models.OHLCV) []float64 {
-out := make([]float64, len(bars))
+	out := make([]float64, len(bars))
 	for i, b := range bars {
 		out[i] = b.Close
 	}
@@ -43,9 +43,22 @@ func vols(bars []models.OHLCV) []float64 {
 
 func ema(src []float64, period int) []float64 {
 	out := make([]float64, len(src))
+	if len(src) < period {
+		for i := range src {
+			out[i] = src[i]
+		}
+		return out
+	}
+	sum := 0.0
+	for i := 0; i < period; i++ {
+		sum += src[i]
+	}
+	sma := sum / float64(period)
+	for i := 0; i < period; i++ {
+		out[i] = sma
+	}
 	k := 2.0 / float64(period+1)
-	out[0] = src[0]
-	for i := 1; i < len(src); i++ {
+	for i := period; i < len(src); i++ {
 		out[i] = src[i]*k + out[i-1]*(1-k)
 	}
 	return out
@@ -150,12 +163,38 @@ func supertrendDir(bars []models.OHLCV, period int, multiplier float64) string {
 	l := lows(bars)
 	c := closes(bars)
 	at := atr(h, l, c, period)
-	last := len(bars) - 1
-	hl2 := (h[last] + l[last]) / 2
-	upper := hl2 + multiplier*at[last]
-	lower := hl2 - multiplier*at[last]
-	_ = upper
-	if c[last] > lower {
+	n := len(bars)
+
+	var prevUpper, prevLower, prevDir float64
+	for i := period; i < n; i++ {
+		mid := (h[i] + l[i]) / 2
+		upper := mid + multiplier*at[i]
+		lower := mid - multiplier*at[i]
+
+		if i > period {
+			if upper < prevUpper {
+				upper = prevUpper
+			}
+			if lower > prevLower {
+				lower = prevLower
+			}
+		}
+
+		dir := 1.0
+		if prevUpper < prevLower && c[i] < prevUpper {
+			dir = -1
+		} else if prevLower > prevUpper && c[i] > prevLower {
+			dir = 1
+		} else {
+			dir = prevDir
+		}
+
+		prevUpper = upper
+		prevLower = lower
+		prevDir = dir
+	}
+
+	if prevDir == 1 {
 		return "Buy"
 	}
 	return "Sell"

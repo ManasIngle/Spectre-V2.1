@@ -1,35 +1,39 @@
 package api
 
 import (
-"github.com/gin-gonic/gin"
-"spectre/api/handlers"
+	"net/http"
+	"os"
+
+	"github.com/gin-gonic/gin"
+	"spectre/api/handlers"
 )
 
-func NewRouter() *gin.Engine {
-r := gin.Default()
+func guardReset(c *gin.Context) {
+	key := c.GetHeader("X-Reset-Key")
+	expected := os.Getenv("RESET_KEY")
+	if key == "" || (expected != "" && key != expected) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or missing X-Reset-Key"})
+		c.Abort()
+		return
+	}
+	c.Next()
+}
 
-	// CORS
-	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type")
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-		c.Next()
-	})
+func NewRouter() *gin.Engine {
+	r := gin.Default()
 
 	api := r.Group("/api")
 	{
-		api.GET("/health",           handlers.GetHealth)
-		api.GET("/dashboard",        handlers.GetDashboard)
+		api.GET("/health", handlers.GetHealth)
+		api.GET("/dashboard", handlers.GetDashboard)
 		api.GET("/market-direction", handlers.GetMarketDirection)
-		api.GET("/oi-chain",         handlers.GetOIChain)
-		api.GET("/trade-signals",          handlers.GetTradeSignals)
-		api.GET("/institutional-outlook",  handlers.GetInstitutionalOutlook)
-		api.GET("/stability-state",        handlers.GetStabilityState)
-		api.POST("/stability-reset",       handlers.ResetStability)
+		api.GET("/oi-chain", handlers.GetOIChain)
+		api.GET("/trade-signals", handlers.GetTradeSignals)
+		api.GET("/morning-signal", handlers.GetMorningSignal)
+		api.POST("/morning-signal/refresh", handlers.RefreshMorningSignalHandler)
+		api.GET("/institutional-outlook", handlers.GetInstitutionalOutlook)
+		api.GET("/stability-state", handlers.GetStabilityState)
+		api.POST("/stability-reset", guardReset, handlers.ResetStability)
 	}
 
 	return r

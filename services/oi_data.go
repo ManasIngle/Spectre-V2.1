@@ -1,31 +1,32 @@
 package services
 
 import (
-"encoding/json"
-"fmt"
-"io"
-"net/http"
-neturl "net/url"
-"time"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	neturl "net/url"
+	"time"
 
-"spectre/models"
+	"spectre/models"
 )
 
 var oiCache = NewTTLCache()
 
 const oiCacheTTL = 30 * time.Second
 
-// cookieJar is a minimal http.CookieJar to hold NSE session cookies.
 type cookieJar struct {
 	cookies map[string][]*http.Cookie
 }
 
 func (j *cookieJar) SetCookies(u *neturl.URL, cookies []*http.Cookie) { j.cookies[u.Host] = cookies }
-func (j *cookieJar) Cookies(u *neturl.URL) []*http.Cookie              { return j.cookies[u.Host] }
+func (j *cookieJar) Cookies(u *neturl.URL) []*http.Cookie             { return j.cookies[u.Host] }
 
-func newClient() *http.Client {
+var oiClient *http.Client
+
+func init() {
 	jar := &cookieJar{cookies: make(map[string][]*http.Cookie)}
-	return &http.Client{Timeout: 12 * time.Second, Jar: jar}
+	oiClient = &http.Client{Timeout: 12 * time.Second, Jar: jar}
 }
 
 func FetchOIChain() (*models.OIChainData, error) {
@@ -33,25 +34,34 @@ func FetchOIChain() (*models.OIChainData, error) {
 		return v.(*models.OIChainData), nil
 	}
 
-	client := newClient()
-
-	// Prime cookies
-	homeReq, _ := http.NewRequest("GET", "https://www.nseindia.com", nil)
+	homeReq, err := http.NewRequest("GET", "https://www.nseindia.com", nil)
+	if err != nil {
+		return &models.OIChainData{Error: fmt.Sprintf("build home req: %v", err)}, nil
+	}
 	homeReq.Header.Set("User-Agent", "Mozilla/5.0")
-	client.Do(homeReq) //nolint
+	oiClient.Do(homeReq)
 
-	url := "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
-	req, _ := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY", nil)
+	if err != nil {
+		return &models.OIChainData{Error: fmt.Sprintf("build OI req: %v", err)}, nil
+	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Referer", "https://www.nseindia.com")
 
-	resp, err := client.Do(req)
+	resp, err := oiClient.Do(req)
 	if err != nil {
 		return &models.OIChainData{Error: err.Error()}, nil
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return &models.OIChainData{Error: fmt.Sprintf("NSE returned HTTP %d", resp.StatusCode)}, nil
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	resp.Body.Close()
+	if err != nil {
+		return &models.OIChainData{Error: fmt.Sprintf("read body: %v", err)}, nil
+	}
 
 	var raw struct {
 		Records struct {

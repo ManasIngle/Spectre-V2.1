@@ -4,8 +4,9 @@ models once and serves predictions via HTTP to the Go main server.
 
 Run: uvicorn sidecar:app --port 8240
 """
-import os, json, time, numpy as np, joblib
+import os, json, time, numpy as np, joblib, datetime as dt
 from fastapi import FastAPI
+import zoneinfo
 
 ML_DIR = os.path.join(os.path.dirname(__file__), "models")
 
@@ -86,10 +87,17 @@ def startup_load():
 
 import aiohttp, asyncio, pandas as pd
 
-async def _fetch_1m(ticker="%5ENSEI"):
-    # Fetch TRUE 1-minute data, limiting to 1 day to save bandwidth since we only need last 5 mins
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range=1d"
-    async with aiohttp.ClientSession() as s:
+async def _fetch_1m(ticker="%5ENSEI", days="1d"):
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range={days}"
+    timeout = aiohttp.ClientTimeout(total=10)
+    async with aiohttp.ClientSession(timeout=timeout) as s:
+        async with s.get(url, headers={"User-Agent":"Mozilla/5.0"}) as r:
+            return await r.json()
+
+async def _fetch_5m(ticker="%5ENSEI", days="5d"):
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=5m&range={days}"
+    timeout = aiohttp.ClientTimeout(total=10)
+    async with aiohttp.ClientSession(timeout=timeout) as s:
         async with s.get(url, headers={"User-Agent":"Mozilla/5.0"}) as r:
             return await r.json()
 
@@ -204,7 +212,6 @@ def _extract_features(bars, feature_cols):
         feat["feat_slow_st_dir"] = 1 if c.iloc[-1]>us.iloc[-2] else (-1 if c.iloc[-1]<ls.iloc[-2] else 0)
     except: feat["feat_slow_st_dir"] = 0
 
-    import datetime as dt, zoneinfo
     try:
         ist = zoneinfo.ZoneInfo("Asia/Kolkata")
     except Exception:
@@ -397,4 +404,160 @@ async def predict():
         return {"error": str(e), "trace": traceback.format_exc()}
 
 @app.get("/health")
-def health(): return {"status":"ok","rolling_model_loaded":_rolling_xgb is not None, "cross_model_loaded": _cross_xgb is not None}
+def health(): return {"status":"ok","rolling_model_loaded":_rolling_xgb is not None, "cross_model_loaded": _cross_xgb is not None, "old_model_loaded": _old_direction_xgb is not None}
+
+@app.get("/morning-predict")
+async def morning_predict():
+    import datetime as dt
+    try:
+        try:
+            ist = zoneinfo.ZoneInfo("Asia/Kolkata")
+        except Exception:
+            import pytz
+            ist = pytz.timezone("Asia/Kolkata")
+        now = dt.datetime.now(ist)
+
+        if now.hour != 9 or now.minute < 5 or now.minute > 25:
+            return {"error": "morning signal only available 09:05-09:25 IST", "skip": True}
+
+        if _old_direction_xgb is None or _old_meta is None:
+            return {"error": "old direction model not loaded", "skip": True}
+        if _meta is None:
+            return {"error": "metadata not loaded", "skip": True}
+
+        raw_1m, raw_5m = await asyncio.gather(
+            _fetch_1m("%5ENSEI", "2d"),
+            _fetch_5m("%5ENSEI", "5d"),
+        )
+
+        if "chart" not in raw_1m or not raw_1m["chart"].get("result"):
+            return {"error": "Yahoo Finance returned no Nifty 1m data", "skip": True}
+
+        result = raw_1m["chart"]["result"][0]
+        ts = result.get("timestamp", [])
+        q = result["indicators"]["quote"][0]
+
+        bars = _clean_bars(
+            q.get("close", []),
+            q.get("high", []),
+            q.get("low", []),
+            q.get("open", q.get("close", [])),
+            q.get("volume", [1] * len(ts))
+        )
+
+        if len(bars) < 55:
+            return {"error": f"insufficient 1m bars: {len(bars)} (need 55+)", "skip": True}
+
+        X, df_rolling = _extract_features(bars, _old_meta["feature_columns"])
+        if X is None:
+            return {"error": "insufficient rolling data for feature extraction", "skip": True}
+
+        pred = int(_old_direction_xgb.predict(X)[0])
+        probs = _old_direction_xgb.predict_proba(X)[0].tolist()
+
+        labels = ["DOWN", "SIDEWAYS", "UP"]
+        top_idx = int(np.argmax(probs))
+        top_prob = probs[top_idx]
+        second_prob = sorted(probs)[-2]
+        gap = top_prob - second_prob
+        conf = top_prob * 100
+
+        ltp = df_rolling.Close.iloc[-1]
+
+        gap_pct = 0.0
+        prev_close = 0.0
+        today_open = 0.0
+        closes_5m = []
+
+        if "chart" in raw_5m and raw_5m["chart"].get("result"):
+            r5 = raw_5m["chart"]["result"][0]
+            q5 = r5["indicators"]["quote"][0]
+            closes_5m = [c for c in q5.get("close", []) if c is not None and c > 0]
+            opens_5m = [o for o in q5.get("open", []) if o is not None and o > 0]
+            if len(closes_5m) >= 2:
+                prev_close = closes_5m[-2] if len(closes_5m) >= 2 else closes_5m[-1]
+                today_open = df_rolling.Open.iloc[-1] if len(df_rolling) > 0 else 0
+                if prev_close > 0 and today_open > 0:
+                    gap_pct = round((today_open - prev_close) / prev_close * 100, 3)
+
+        gap_type = "FLAT"
+        gap_filter = "OK"
+        gap_severity = "none"
+        GAP_LARGE = 0.8
+        GAP_MODERATE = 0.4
+
+        if gap_pct > GAP_LARGE:
+            gap_type = "LARGE GAP UP"
+            gap_severity = "high"
+            gap_filter = "SKIP"
+        elif gap_pct > GAP_MODERATE:
+            gap_type = "MODERATE GAP UP"
+            gap_severity = "medium"
+            gap_filter = "CAUTION"
+        elif gap_pct < -GAP_LARGE:
+            gap_type = "LARGE GAP DOWN"
+            gap_severity = "high"
+            gap_filter = "SKIP"
+        elif gap_pct < -GAP_MODERATE:
+            gap_type = "MODERATE GAP DOWN"
+            gap_severity = "medium"
+            gap_filter = "CAUTION"
+
+        prev_day_trend = "NEUTRAL"
+        if len(closes_5m) >= 50:
+            last_50 = closes_5m[-50:]
+            prev_day_close = last_50[0]
+            prev_day_end = last_50[-2] if len(last_50) >= 2 else last_50[-1]
+            if prev_day_close > 0:
+                chg = (prev_day_end - prev_day_close) / prev_day_close * 100
+                if chg > 0.3:
+                    prev_day_trend = "BULLISH"
+                elif chg < -0.3:
+                    prev_day_trend = "BEARISH"
+
+        raw_signal = "NO TRADE"
+        opt_type = "-"
+        if labels[pred] == "UP" and conf > 38:
+            raw_signal = "BUY CE"
+            opt_type = "CE"
+        elif labels[pred] == "DOWN" and conf > 38:
+            raw_signal = "BUY PE"
+            opt_type = "PE"
+
+        if gap_filter == "SKIP" and conf < 55:
+            raw_signal = "NO TRADE (GAP SKIP)"
+            opt_type = "-"
+
+        if gap_filter == "CAUTION":
+            raw_signal = f"{raw_signal} (CAUTION)"
+
+        filtered_conf = conf
+        if gap_severity == "high":
+            filtered_conf = conf * 0.5
+        elif gap_severity == "medium":
+            filtered_conf = conf * 0.75
+
+        return {
+            "prediction": labels[pred],
+            "confidence": round(conf, 1),
+            "filtered_confidence": round(filtered_conf, 1),
+            "probs": {k: round(v * 100, 1) for k, v in zip(labels, probs)},
+            "prob_gap": round(gap * 100, 1),
+            "raw_signal": raw_signal,
+            "option_type": opt_type,
+            "nifty_spot": round(ltp, 2),
+            "prev_day_close": round(prev_close, 2),
+            "today_open": round(today_open, 2),
+            "gap_pct": gap_pct,
+            "gap_type": gap_type,
+            "gap_severity": gap_severity,
+            "gap_filter": gap_filter,
+            "prev_day_trend": prev_day_trend,
+            "model_accuracy": round(_old_meta.get("accuracy", 0) * 100, 1),
+            "generated_at": now.strftime("%H:%M:%S IST"),
+            "valid_for_minutes": 5,
+            "features_used": len(_old_meta.get("feature_columns", [])),
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "trace": traceback.format_exc()}
