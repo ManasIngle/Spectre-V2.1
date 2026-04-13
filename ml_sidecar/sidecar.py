@@ -356,8 +356,13 @@ async def predict():
                 import traceback
                 print(f"Cross-asset prediction error: {ce}\n{traceback.format_exc()}")
 
-        model_acc = _meta.get("accuracy", 0) * 100
-        old_model_acc = _old_meta.get("accuracy", 0) * 100 if _old_meta else 0
+        def _parse_acc(meta_dict):
+            if not meta_dict: return 0.0
+            a = meta_dict.get("accuracy", 0)
+            return a if a > 1 else a * 100
+
+        model_acc = _parse_acc(_meta)
+        old_model_acc = _parse_acc(_old_meta)
 
         resp = {
             "prediction": pred,
@@ -373,7 +378,7 @@ async def predict():
                     "prediction": rolling_pred,
                     "probs": rolling_probs,
                     "label": "Rolling (Stable Signal)",
-                    "accuracy": round(_meta.get("accuracy", 0) * 100, 2) if _meta else 0,
+                    "accuracy": round(_parse_acc(_meta), 2),
                 },
                 "direction": {
                     "prediction": dir_pred,
@@ -385,7 +390,7 @@ async def predict():
                     "prediction": cross_pred if cross_pred is not None else pred,
                     "probs": cross_probs if cross_probs else [0, 0, 0],
                     "label": "Cross-Asset (BankNifty)",
-                    "accuracy": round(_meta.get("accuracy", 0) * 100, 2) if _meta else 0,
+                    "accuracy": round(_parse_acc(_meta), 2),
                 },
             },
         }
