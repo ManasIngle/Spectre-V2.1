@@ -66,8 +66,20 @@ func logSignalToCSV(t time.Time, s *models.TradeSignal) {
 	if info.Size() == 0 {
 		writer.Write([]string{
 			"Timestamp", "NiftySpot", "RawSignal", "StableSignal", "CrossAssetSignal",
-			"Confidence", "TargetEst", "ValidUntil",
+			"Confidence", "Strike", "OptionType", "Option_LTP", "TargetNifty", "SLNifty",
+			"ProbUp", "ProbDown", "CrossAssetProbUp", "CrossAssetProbDown",
 		})
+	}
+
+	optLTP := ""
+	if s.OptionLTP != nil {
+		optLTP = fmt.Sprintf("%.2f", *s.OptionLTP)
+	}
+
+	crossProbUp, crossProbDown := 0.0, 0.0
+	if len(s.CrossAssetProbs) >= 3 {
+		crossProbDown = s.CrossAssetProbs[0]
+		crossProbUp = s.CrossAssetProbs[2]
 	}
 
 	record := []string{
@@ -77,8 +89,15 @@ func logSignalToCSV(t time.Time, s *models.TradeSignal) {
 		s.Signal,
 		s.CrossAssetSignal,
 		fmt.Sprintf("%.1f", s.Confidence),
-		fmt.Sprintf("%.2f", s.TargetEst),
-		s.ValidUntil,
+		fmt.Sprintf("%.0f", s.Strike),
+		s.OptionType,
+		optLTP,
+		fmt.Sprintf("%.2f", s.TargetNifty),
+		fmt.Sprintf("%.2f", s.SLNifty),
+		fmt.Sprintf("%.1f", s.ProbUp),
+		fmt.Sprintf("%.1f", s.ProbDown),
+		fmt.Sprintf("%.1f", crossProbUp),
+		fmt.Sprintf("%.1f", crossProbDown),
 	}
 
 	if err := writer.Write(record); err != nil {

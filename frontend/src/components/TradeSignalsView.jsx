@@ -69,6 +69,15 @@ const TradeSignalsView = () => {
                     {/* Signal Badge */}
                     <div style={{ textAlign: 'center', minWidth: '160px' }}>
                         <div style={{
+                            display: 'inline-block', fontSize: '0.6rem', fontWeight: 700,
+                            color: '#a78bfa', background: 'rgba(167,139,250,0.12)',
+                            border: '1px solid rgba(167,139,250,0.25)',
+                            borderRadius: '4px', padding: '0.15rem 0.5rem',
+                            letterSpacing: '0.06em', marginBottom: '0.35rem', textTransform: 'uppercase',
+                        }}>
+                            Stabilized Ensemble · Model 1 + 2
+                        </div>
+                        <div style={{
                             fontSize: '2rem', fontWeight: 800, color: mainColor,
                             fontFamily: 'var(--font-display)', letterSpacing: '-0.02em',
                         }}>
@@ -129,7 +138,7 @@ const TradeSignalsView = () => {
             </div>
 
             {/* ═══ BOTTOM ROW ═══ */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
 
                 {/* Probability Bars */}
                 <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: '1rem 1.5rem' }}>
@@ -139,28 +148,6 @@ const TradeSignalsView = () => {
                     <ProbBar label="UP (Buy CE)" pct={data.prob_up} color="#10b981" />
                     <ProbBar label="SIDEWAYS" pct={data.prob_sideways} color="#94a3b8" />
                     <ProbBar label="DOWN (Buy PE)" pct={data.prob_down} color="#ef4444" />
-                </div>
-                
-                {/* Cross-Asset Aggressive Breakout */}
-                <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: '1rem 1.5rem', border: '1px solid rgba(234, 179, 8, 0.3)' }}>
-                    <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.75rem', color: '#eab308' }}>
-                        BankNifty Cross-Asset 
-                        <span style={{ fontSize: '0.65rem', marginLeft: '8px', color: 'var(--text-muted)' }}>(Aggressive Trend)</span>
-                    </h3>
-                    
-                    <div style={{
-                        fontSize: '1.4rem', fontWeight: 800, marginBottom: '1rem',
-                        color: data.CrossAssetSignal === 'UP' ? '#10b981' : data.CrossAssetSignal === 'DOWN' ? '#ef4444' : '#94a3b8'
-                    }}>
-                        {data.CrossAssetSignal === 'UP' ? 'BUY CE' : data.CrossAssetSignal === 'DOWN' ? 'BUY PE' : 'NO TRADE'}
-                    </div>
-                    
-                    {data.cross_asset_probs && data.cross_asset_probs.length === 3 && (
-                        <>
-                            <ProbBar label="UP" pct={data.cross_asset_probs[2]} color="#10b981" height="4px" />
-                            <ProbBar label="DOWN" pct={data.cross_asset_probs[0]} color="#ef4444" height="4px" />
-                        </>
-                    )}
                 </div>
 
                 {/* Key Factors */}

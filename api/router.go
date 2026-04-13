@@ -34,6 +34,8 @@ func NewRouter() *gin.Engine {
 		api.GET("/institutional-outlook", handlers.GetInstitutionalOutlook)
 		api.GET("/stability-state", handlers.GetStabilityState)
 		api.POST("/stability-reset", guardReset, handlers.ResetStability)
+		api.GET("/ml-logs", handlers.GetMLLogs)
+		api.GET("/ml-logs/download", handlers.DownloadMLLogs)
 	}
 
 	return r
