@@ -147,13 +147,14 @@ func GenerateTradeSignal() (*models.TradeSignal, error) {
 		}
 	}
 
-	// Equity momentum from Nifty price action on current bars
+	// Equity momentum: session open (first bar of day) vs current close
 	equityReturn := 0.0
 	equityAdvPct := 0.0
 	if len(bars) > 0 {
-		last := bars[len(bars)-1]
-		if last.Open > 0 {
-			equityReturn = math.Round((last.Close-last.Open)/last.Open*10000) / 100
+		sessionOpen := bars[0].Open
+		currentClose := bars[len(bars)-1].Close
+		if sessionOpen > 0 {
+			equityReturn = math.Round((currentClose-sessionOpen)/sessionOpen*10000) / 100
 		}
 		lookback := 20
 		if lookback > len(bars) {

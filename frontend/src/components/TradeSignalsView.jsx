@@ -102,7 +102,7 @@ const TradeSignalsView = () => {
                             display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.75rem 2rem',
                             flex: 1, minWidth: '300px',
                         }}>
-                            <LevelBox label="Nifty Spot" value={data.nifty_spot} color="var(--text-primary)" />
+                            <LevelBox label="Nifty Spot" value={parseFloat(data.nifty_spot).toFixed(2)} color="var(--text-primary)" />
                             <LevelBox label="Target (Nifty)" value={data.target_nifty} color="#10b981" />
                             <LevelBox label="SL (Nifty)" value={data.sl_nifty} color="#ef4444" />
                             <LevelBox label="Strike" value={data.strike} color={mainColor} />
