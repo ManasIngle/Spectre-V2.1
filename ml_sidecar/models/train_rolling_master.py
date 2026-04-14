@@ -15,28 +15,25 @@ MODEL_DIR = os.path.dirname(__file__)
 def get_1m_data():
     print("Loading 10 Years of 1-minute data from Treasure Trove Dataset...")
     file_path = "/Users/manasingle/Edge/Market Dataset since 2015/NIFTY 50_minute.csv"
-    
+    vix_path  = "/Users/manasingle/Edge/Market Dataset since 2015/INDIA VIX_minute.csv"
+
     df = pd.read_csv(file_path)
-    
-    # Map columns to standard format
-    df.rename(columns={
-        'date': 'Date',
-        'open': 'Open',
-        'high': 'High',
-        'low': 'Low',
-        'close': 'Close',
-        'volume': 'Volume'
-    }, inplace=True)
-    
-    # Set the Date as the datetime index
+    df.rename(columns={'date':'Date','open':'Open','high':'High','low':'Low','close':'Close','volume':'Volume'}, inplace=True)
     df['Date'] = pd.to_datetime(df['Date'])
     df.set_index('Date', inplace=True)
-    
-    # Ensure sequential sorting
     df.sort_index(inplace=True)
-    
     df.dropna(subset=['Close'], inplace=True)
-    print(f"Successfully loaded {len(df):,} strictly parsed 1-minute candles.")
+
+    # Merge India VIX (1-minute)
+    if os.path.exists(vix_path):
+        vix = pd.read_csv(vix_path, parse_dates=['date'])
+        vix.set_index('date', inplace=True)
+        df = df.join(vix[['close']].rename(columns={'close': 'VIX_Close'}), how='left')
+        df['VIX_Close'] = df['VIX_Close'].ffill()
+        print(f"Successfully loaded {len(df):,} 1-minute candles with India VIX merged.")
+    else:
+        print(f"Successfully loaded {len(df):,} 1-minute candles. (VIX file not found)")
+
     return df
 
 def build_rolling_5m_windows(df_1m):
@@ -84,16 +81,18 @@ def feature_engineering(df):
     print("Calculating 31 Technical Features on rolling data...")
     df = add_features(df)
     
-    # Target: We are testing 30 minutes into the future. 
-    # Since our dataframe steps by 1 minute, 30 minutes ahead = exactly 30 rows!
-    forward_bars = 30 
-    threshold_pct = 0.08  # Scalping threshold
-    
+    # Target: 30 minutes into the future (30 rows at 1-min resolution)
+    # Asymmetric thresholds: DOWN requires 30% bigger move to label.
+    # Backtest insight: BUY PE win rate 47.9% vs BUY CE 63.1% — reduce false bearish labels.
+    forward_bars = 30
+    threshold_pct = 0.08  # Scalping threshold (UP)
+    threshold_dn = threshold_pct * 1.3  # DOWN needs a bigger move (0.104%)
+
     close = df['Close']
     future_return = (close.shift(-forward_bars) - close) / close * 100
     df['target'] = 0
     df.loc[future_return > threshold_pct, 'target'] = 1
-    df.loc[future_return < -threshold_pct, 'target'] = -1
+    df.loc[future_return < -threshold_dn, 'target'] = -1
     
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df.dropna(subset=FEATURE_COLUMNS + ['target'], inplace=True)
@@ -112,10 +111,12 @@ def train_model(df, feature_cols):
     X_train, X_test = X[:split_idx], X[split_idx:]
     y_train, y_test = y[:split_idx], y[split_idx:]
     
-    # Sample Weights
+    # Sample Weights (balanced, then reduce DOWN to suppress false bearish)
+    # Backtest: BUY PE win rate 47.9% vs BUY CE 63.1% — be conservative on DOWN
     class_counts = np.bincount(y_train.astype(int))
     total = len(y_train)
     weights = {i: total / (len(class_counts) * c) if c > 0 else 1.0 for i, c in enumerate(class_counts)}
+    weights[0] = max(weights[0] * 0.7, 0.5)  # DOWN: reduce weight → less false bearish
     sample_weights = np.array([weights[int(yi)] for yi in y_train])
 
     print("\nInitiating RandomizedSearchCV Hyperparameter Tuning on Rolling Data...")
@@ -151,13 +152,17 @@ def train_model(df, feature_cols):
     print(f"=============================================")
     print(classification_report(y_test, y_pred, target_names=["DOWN", "SIDEWAYS", "UP"]))
     
-    # Save Model
-    save_path = os.path.join(MODEL_DIR, "nifty_rolling_model.pkl")
+    # Save — versioned to preserve old model
+    save_path = os.path.join(MODEL_DIR, "nifty_rolling_model-Rtr14April.pkl")
     joblib.dump(model, save_path)
     print(f"\nSaved Rolling Master AI to {save_path}")
 
 if __name__ == "__main__":
     df_1m = get_1m_data()
     rolling_df = build_rolling_5m_windows(df_1m)
+    # Re-attach VIX — the rolling window builder creates a new df dropping extra columns
+    if 'VIX_Close' in df_1m.columns:
+        rolling_df = rolling_df.join(df_1m[['VIX_Close']], how='left')
+        rolling_df['VIX_Close'] = rolling_df['VIX_Close'].ffill()
     train_df, f_cols = feature_engineering(rolling_df)
     train_model(train_df, f_cols)

@@ -44,38 +44,48 @@ _old_meta = None
 def _load():
     global _rolling_xgb, _direction_xgb, _old_direction_xgb, _cross_xgb, _meta, _old_meta
 
-    # Load the 10-Year Vanilla Native 1-minute Rolling Model (stable signal)
-    vanilla_path = os.path.join(ML_DIR, "nifty_rolling_model.pkl")
+    # Model version suffix — change this to "" to revert to original models
+    VER = "-Rtr14April"
+
+    # Load Rolling Master (retrained on 1M rows of 1m data)
+    vanilla_path = os.path.join(ML_DIR, f"nifty_rolling_model{VER}.pkl")
+    if not os.path.exists(vanilla_path):
+        vanilla_path = os.path.join(ML_DIR, "nifty_rolling_model.pkl")  # fallback to original
     if os.path.exists(vanilla_path):
         _rolling_xgb = joblib.load(vanilla_path)
         print(f"Loaded rolling model: {vanilla_path}")
 
-    # Load the Direction Model (5m preferred — latest stable)
-    paths = _get_model_paths()
-    dir_path = paths["model"]
+    # Load Direction Model (5m retrained on 207K rows)
+    dir_path = os.path.join(ML_DIR, f"nifty_direction_model_5m{VER}.pkl")
+    if not os.path.exists(dir_path):
+        dir_path = os.path.join(ML_DIR, "nifty_direction_model_5m.pkl")  # fallback
     if os.path.exists(dir_path):
         _direction_xgb = joblib.load(dir_path)
         print(f"Loaded direction model: {dir_path}")
 
-    # Also load the OLD 1h fallback model separately
+    # Load OLD 1h model (original — not retrained, kept as OldDirection signal)
     old_dir_path = os.path.join(ML_DIR, "nifty_direction_model.pkl")
-    if os.path.exists(old_dir_path) and dir_path != old_dir_path:
+    if os.path.exists(old_dir_path):
         _old_direction_xgb = joblib.load(old_dir_path)
         print(f"Loaded OLD direction model: {old_dir_path}")
 
-    # Load the 10-Year BankNifty Cross-Asset Model
-    cross_path = os.path.join(ML_DIR, "nifty_cross_asset_model.pkl")
+    # Load Cross-Asset Model (retrained on 1M synced Nifty+BankNifty bars)
+    cross_path = os.path.join(ML_DIR, f"nifty_cross_asset_model{VER}.pkl")
+    if not os.path.exists(cross_path):
+        cross_path = os.path.join(ML_DIR, "nifty_cross_asset_model.pkl")  # fallback
     if os.path.exists(cross_path):
         _cross_xgb = joblib.load(cross_path)
         print(f"Loaded cross-asset model: {cross_path}")
 
-    # Standard Metadata for column names
-    meta_path = os.path.join(ML_DIR, "model_metadata_5m.json")
+    # Load metadata for retrained 5m model (35 features)
+    meta_path = os.path.join(ML_DIR, f"model_metadata_5m{VER}.json")
+    if not os.path.exists(meta_path):
+        meta_path = os.path.join(ML_DIR, "model_metadata_5m.json")  # fallback
     if os.path.exists(meta_path):
         with open(meta_path) as f: _meta = json.load(f)
         print(f"Loaded metadata: {meta_path} ({len(_meta.get('feature_columns',[]))} features)")
 
-    # Old model metadata
+    # Old model metadata (31 features — for OldDirection model)
     old_meta_path = os.path.join(ML_DIR, "model_metadata.json")
     if os.path.exists(old_meta_path):
         with open(old_meta_path) as f: _old_meta = json.load(f)
@@ -101,6 +111,19 @@ async def _fetch_5m(ticker="%5ENSEI", days="5d"):
         async with s.get(url, headers={"User-Agent":"Mozilla/5.0"}) as r:
             return await r.json()
 
+async def _fetch_vix() -> list:
+    """Fetch India VIX 1m closes from Yahoo Finance. Returns list of recent VIX values."""
+    try:
+        data = await _fetch_1m("%5EINDIAVIX", days="1d")
+        if "chart" in data and data["chart"].get("result"):
+            q = data["chart"]["result"][0]["indicators"]["quote"][0]
+            closes = [v for v in q.get("close", []) if v is not None]
+            if closes:
+                return closes
+    except Exception:
+        pass
+    return []
+
 def build_rolling_bar(bars):
     """
     Takes the last 5 1-minute candles and mathematically crushes them 
@@ -124,7 +147,7 @@ def build_rolling_bar(bars):
     
     return [roll_c, roll_h, roll_l, roll_o, roll_v]
 
-def _extract_features(bars, feature_cols):
+def _extract_features(bars, feature_cols, vix_closes=None):
     import pandas as pd
     from ta.trend import ADXIndicator, MACD, EMAIndicator
     from ta.momentum import RSIIndicator
@@ -236,6 +259,47 @@ def _extract_features(bars, feature_cols):
         feat["feat_premium_change_rate"] = feat["feat_futures_premium_proxy"]-pp
     except: feat["feat_futures_premium_proxy"]=feat["feat_premium_change_rate"]=0
 
+    # India VIX features
+    if vix_closes and len(vix_closes) >= 2:
+        vix_s = pd.Series(vix_closes)
+        vix_now = float(vix_s.iloc[-1])
+        feat["feat_vix_level"] = vix_now
+        feat["feat_vix_change"] = float(vix_s.pct_change().iloc[-1] * 100) if len(vix_s) > 1 else 0.0
+        avg20 = float(vix_s.rolling(20).mean().iloc[-1]) if len(vix_s) >= 20 else float(vix_s.mean())
+        feat["feat_vix_vs_avg"] = ((vix_now - avg20) / avg20 * 100) if avg20 > 0 else 0.0
+        feat["feat_vix_regime"] = 0.0 if vix_now < 13 else (1.0 if vix_now < 20 else (2.0 if vix_now < 30 else 3.0))
+    else:
+        feat["feat_vix_level"] = 16.0
+        feat["feat_vix_change"] = 0.0
+        feat["feat_vix_vs_avg"] = 0.0
+        feat["feat_vix_regime"] = 1.0
+
+    # NEW: Momentum continuity features (must match train_multitf.py FEATURE_COLUMNS order)
+    try:
+        ret = c.pct_change()
+        ret_pos = (ret > 0).astype(int)
+        consec_up_series = ret_pos.groupby((ret_pos != ret_pos.shift()).cumsum()).cumsum() * ret_pos
+        feat["feat_consec_up"] = float(consec_up_series.iloc[-1])
+        ret_neg = (ret < 0).astype(int)
+        consec_dn_series = ret_neg.groupby((ret_neg != ret_neg.shift()).cumsum()).cumsum() * ret_neg
+        feat["feat_consec_down"] = float(consec_dn_series.iloc[-1])
+    except: feat["feat_consec_up"] = feat["feat_consec_down"] = 0
+
+    try:
+        now_h = feat["feat_hour"]
+        now_m = feat["feat_minutes_since_open"] + 9 * 60 + 15  # reverse back to abs minute
+        market_open_min = 9 * 60 + 15
+        feat["feat_session_position"] = max(0.0, min(1.0, (now_h * 60 + (now_m % 60) - market_open_min) / 375))
+    except: feat["feat_session_position"] = 0.5
+
+    try:
+        ema9_series = EMAIndicator(c, 9).ema_indicator()
+        ema9_dir = ema9_series.diff().map(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+        rsi_series = RSIIndicator(c, 14).rsi()
+        rsi_dir = rsi_series.diff().map(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+        feat["feat_momentum_divergence"] = float(ema9_dir.iloc[-1] != rsi_dir.iloc[-1])
+    except: feat["feat_momentum_divergence"] = 0
+
     # Ensure all columns exist based on training expectations
     X = np.array([[feat.get(k,0) for k in feature_cols]])
     X = np.nan_to_num(X)
@@ -265,7 +329,9 @@ async def predict():
         if _meta is None:
             return {"error": "metadata not loaded — check /app/models/model_metadata_5m.json"}
 
-        raw, raw_bank = await asyncio.gather(_fetch_1m("%5ENSEI"), _fetch_1m("%5ENSEBANK"))
+        raw, raw_bank, vix_closes = await asyncio.gather(
+            _fetch_1m("%5ENSEI"), _fetch_1m("%5ENSEBANK"), _fetch_vix()
+        )
 
         if "chart" not in raw or not raw["chart"].get("result"):
             return {"error": "Yahoo Finance returned no Nifty data"}
@@ -285,7 +351,7 @@ async def predict():
         if len(bars) < 55:
             return {"error": f"insufficient bars from Yahoo: {len(bars)} (need 55+)"}
 
-        X, df_rolling = _extract_features(bars, _meta["feature_columns"])
+        X, df_rolling = _extract_features(bars, _meta["feature_columns"], vix_closes=vix_closes)
         if X is None:
             return {"error": "insufficient rolling data for feature extraction"}
 

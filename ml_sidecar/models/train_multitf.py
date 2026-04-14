@@ -41,24 +41,30 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 MODEL_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(MODEL_DIR, "data")
 
+# Local 10-year dataset (primary source — much richer than Yahoo 60-day data)
+LOCAL_DATASET_DIR = "/Users/manasingle/Edge/Market Dataset since 2015"
+
 # ─── Timeframe Configuration ─────────────────────────────────────────────────
 TF_CONFIGS = {
     "5m": {
-        "data_file": "nifty_5m.csv",
+        "data_file": "NIFTY 50_5minute.csv",
+        "vix_file":  "INDIA VIX_5minute.csv",
         "forward_bars": 6,        # 6 × 5m = 30 minutes ahead
         "threshold_pct": 0.08,    # Tighter threshold for short-term
         "lstm_seq_len": 30,       # 30 × 5m = 2.5 hours lookback
         "role": "Scalp trigger (30-min prediction)",
     },
     "15m": {
-        "data_file": "nifty_15m.csv",
+        "data_file": "NIFTY 50_15minute.csv",
+        "vix_file":  "INDIA VIX_15minute.csv",
         "forward_bars": 6,        # 6 × 15m = 90 minutes ahead
         "threshold_pct": 0.12,    # Medium threshold
         "lstm_seq_len": 24,       # 24 × 15m = 6 hours lookback
         "role": "Swing confirmation (90-min prediction)",
     },
     "1h": {
-        "data_file": "nifty_1h.csv",
+        "data_file": "NIFTY 50_60minute.csv",
+        "vix_file":  "INDIA VIX_60minute.csv",
         "forward_bars": 6,        # 6 × 1h = 6 hours ahead
         "threshold_pct": 0.15,    # Original threshold
         "lstm_seq_len": 30,       # 30 × 1h = 30 hours lookback
@@ -68,15 +74,31 @@ TF_CONFIGS = {
 
 
 def load_data(tf: str) -> pd.DataFrame:
-    """Load OHLCV data for the specified timeframe."""
+    """Load OHLCV data from local 10-year dataset and merge India VIX."""
     config = TF_CONFIGS[tf]
-    path = os.path.join(DATA_DIR, config["data_file"])
+    path = os.path.join(LOCAL_DATASET_DIR, config["data_file"])
     if not os.path.exists(path):
-        raise FileNotFoundError(f"Data file not found: {path}\nRun data_downloader.py first.")
-    
-    df = pd.read_csv(path, index_col=0, parse_dates=True)
+        raise FileNotFoundError(f"Data file not found: {path}")
+
+    df = pd.read_csv(path, parse_dates=['date'])
+    df.set_index('date', inplace=True)
+    df.index.name = 'Datetime'
+    df.columns = [c.capitalize() for c in df.columns]
     df.dropna(subset=['Close'], inplace=True)
-    print(f"Loaded {tf} data: {len(df)} rows from {path}")
+    df = df.between_time('09:15', '15:30')
+
+    # Merge India VIX
+    vix_path = os.path.join(LOCAL_DATASET_DIR, config["vix_file"])
+    if os.path.exists(vix_path):
+        vix = pd.read_csv(vix_path, parse_dates=['date'])
+        vix.set_index('date', inplace=True)
+        vix.index.name = 'Datetime'
+        df = df.join(vix[['close']].rename(columns={'close': 'VIX_Close'}), how='left')
+        df['VIX_Close'] = df['VIX_Close'].ffill()
+        print(f"Loaded {tf} data: {len(df)} rows | VIX merged ({vix['close'].isna().sum()} VIX nulls)")
+    else:
+        print(f"Loaded {tf} data: {len(df)} rows | VIX file not found, using defaults")
+
     return df
 
 
@@ -187,6 +209,50 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     df['feat_equity_advance_pct'] = 0
     df['feat_equity_momentum'] = 0
 
+    # India VIX features — critical for options trading
+    # VIX tells the model what kind of market it's operating in
+    if 'VIX_Close' in df.columns:
+        vix = df['VIX_Close']
+        df['feat_vix_level'] = vix
+        df['feat_vix_change'] = vix.pct_change(1) * 100
+        vix_avg20 = vix.rolling(20).mean()
+        df['feat_vix_vs_avg'] = ((vix - vix_avg20) / vix_avg20.replace(0, np.nan) * 100).fillna(0)
+        # 0=low(<13), 1=normal(13-20), 2=high(20-30), 3=extreme(>30)
+        df['feat_vix_regime'] = pd.cut(
+            vix, bins=[0, 13, 20, 30, 10000], labels=[0, 1, 2, 3]
+        ).astype(float).fillna(1.0)
+    else:
+        df['feat_vix_level'] = 16.0   # historical mean — neutral
+        df['feat_vix_change'] = 0.0
+        df['feat_vix_vs_avg'] = 0.0
+        df['feat_vix_regime'] = 1.0   # normal regime
+
+    # NEW: Momentum continuity features (from backtest insights)
+    # Consecutive up candles — measures bullish momentum persistence
+    ret = close.pct_change()
+    ret_pos = (ret > 0).astype(int)
+    df['feat_consec_up'] = (
+        ret_pos.groupby((ret_pos != ret_pos.shift()).cumsum()).cumsum() * ret_pos
+    )
+    # Consecutive down candles — measures bearish momentum persistence
+    ret_neg = (ret < 0).astype(int)
+    df['feat_consec_down'] = (
+        ret_neg.groupby((ret_neg != ret_neg.shift()).cumsum()).cumsum() * ret_neg
+    )
+    # Session position (0.0 = market open, 1.0 = market close)
+    # Helps model account for intraday time-decay in directional moves
+    market_open_min = 9 * 60 + 15
+    total_market_mins = 375  # 09:15 to 15:30
+    mins_since_midnight = pd.Series(df.index.hour * 60 + df.index.minute, index=df.index)
+    df['feat_session_position'] = (
+        (mins_since_midnight - market_open_min) / total_market_mins
+    ).clip(0, 1)
+    # Momentum divergence: EMA direction disagrees with RSI direction
+    # High value = mixed signals = lower confidence in trend continuation
+    ema9_dir = ema9.diff().map(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+    rsi_dir = df['feat_rsi'].diff().map(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+    df['feat_momentum_divergence'] = (ema9_dir != rsi_dir).astype(float)
+
     return df
 
 
@@ -201,16 +267,27 @@ FEATURE_COLUMNS = [
     'feat_hour', 'feat_minutes_since_open', 'feat_day_of_week',
     'feat_volatility', 'feat_trend_strength',
     'feat_futures_premium_proxy', 'feat_premium_change_rate',
+    # NEW: momentum continuity features
+    'feat_consec_up', 'feat_consec_down',
+    'feat_session_position', 'feat_momentum_divergence',
+    # India VIX — options volatility regime
+    'feat_vix_level', 'feat_vix_change', 'feat_vix_vs_avg', 'feat_vix_regime',
 ]
 
 
 def create_target(df: pd.DataFrame, forward_bars: int, threshold_pct: float) -> pd.DataFrame:
-    """Create direction target."""
+    """Create direction target with asymmetric thresholds.
+
+    DOWN threshold is 30% higher than UP threshold to reduce false bearish labels.
+    Backtest insight: BUY PE win rate was 47.9% vs BUY CE 63.1% — the model was
+    too trigger-happy on bearish calls. Requiring a bigger move to label DOWN means
+    only high-conviction bearish moves get that label.
+    """
     close = df['Close']
     future_return = (close.shift(-forward_bars) - close) / close * 100
-    df['target'] = 0
-    df.loc[future_return > threshold_pct, 'target'] = 1
-    df.loc[future_return < -threshold_pct, 'target'] = -1
+    df['target'] = 0  # SIDEWAYS default
+    df.loc[future_return > threshold_pct, 'target'] = 1           # UP
+    df.loc[future_return < -(threshold_pct * 1.3), 'target'] = -1  # DOWN (higher bar)
     return df
 
 
@@ -244,12 +321,15 @@ def train_xgboost(tf: str):
     y_train, y_test = y[:split_idx], y[split_idx:]
     print(f"\nTrain: {len(X_train)}, Test: {len(X_test)}")
 
-    # Class weights
+    # Class weights (balanced, then reduce DOWN weight to suppress false bearish)
+    # Backtest: BUY PE win rate 47.9% vs BUY CE 63.1% — model over-predicts bearish.
+    # DOWN (class 0) gets 30% lower weight → model is conservative on bearish calls.
     class_counts = np.bincount(y_train.astype(int))
     total = len(y_train)
     n_classes = len(class_counts)
     class_weights = {i: total / (n_classes * c) if c > 0 else 1.0
                      for i, c in enumerate(class_counts)}
+    class_weights[0] = max(class_weights[0] * 0.7, 0.5)  # DOWN: be conservative
     sample_weights = np.array([class_weights[int(yi)] for yi in y_train])
 
     # Hyperparameter Tuning using RandomizedSearchCV
@@ -310,9 +390,10 @@ def train_xgboost(tf: str):
     for name, imp in feat_imp[:10]:
         print(f"  {name}: {imp:.4f}")
 
-    # Save
-    suffix = f"_{tf}" if tf != "1h" else ""
-    model_path = os.path.join(MODEL_DIR, f"nifty_direction_model{suffix}.pkl")
+    # Save — versioned with retrain date suffix to preserve old models
+    tf_suffix = f"_{tf}" if tf != "1h" else ""
+    ver_suffix = "-Rtr14April"
+    model_path = os.path.join(MODEL_DIR, f"nifty_direction_model{tf_suffix}{ver_suffix}.pkl")
     joblib.dump(model, model_path)
     print(f"\nModel saved: {model_path}")
 
@@ -327,8 +408,12 @@ def train_xgboost(tf: str):
         "n_test_samples": len(X_test),
         "threshold_pct": config["threshold_pct"],
         "forward_bars": config["forward_bars"],
+        "retrain_version": "Rtr14April",
+        "dataset": "local 10-year (Market Dataset since 2015)",
+        "asymmetric_down_threshold": True,
+        "n_features": len(FEATURE_COLUMNS),
     }
-    meta_path = os.path.join(MODEL_DIR, f"model_metadata{suffix}.json")
+    meta_path = os.path.join(MODEL_DIR, f"model_metadata{tf_suffix}{ver_suffix}.json")
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
     print(f"Metadata saved: {meta_path}")
@@ -383,7 +468,7 @@ def train_lstm(tf: str):
         pct_change = (future - current) / current * 100
         if pct_change > threshold:
             y.append(2)   # UP
-        elif pct_change < -threshold:
+        elif pct_change < -(threshold * 1.3):  # asymmetric: DOWN needs bigger move
             y.append(0)   # DOWN
         else:
             y.append(1)   # SIDEWAYS

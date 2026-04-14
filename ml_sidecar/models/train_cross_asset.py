@@ -11,27 +11,37 @@ MODEL_DIR = os.path.dirname(__file__)
 DATA_PATH = "/Users/manasingle/Edge/Market Dataset since 2015"
 
 def load_and_merge_data():
-    print("Loading NIFTY 50 and NIFTY BANK minute data...")
-    
+    print("Loading NIFTY 50, NIFTY BANK, and India VIX minute data...")
+
     nifty = pd.read_csv(os.path.join(DATA_PATH, "NIFTY 50_minute.csv"))
-    bank = pd.read_csv(os.path.join(DATA_PATH, "NIFTY BANK_minute.csv"))
-    
+    bank  = pd.read_csv(os.path.join(DATA_PATH, "NIFTY BANK_minute.csv"))
+    vix_path = os.path.join(DATA_PATH, "INDIA VIX_minute.csv")
+
     # Parse Nifty
-    nifty.rename(columns={'date':'Date', 'open':'Open', 'high':'High', 'low':'Low', 'close':'Close', 'volume':'Volume'}, inplace=True)
+    nifty.rename(columns={'date':'Date','open':'Open','high':'High','low':'Low','close':'Close','volume':'Volume'}, inplace=True)
     nifty['Date'] = pd.to_datetime(nifty['Date'])
     nifty.set_index('Date', inplace=True)
-    
+
     # Parse Bank Nifty
-    bank.rename(columns={'date':'Date', 'open':'Bank_Open', 'high':'Bank_High', 'low':'Bank_Low', 'close':'Bank_Close'}, inplace=True)
+    bank.rename(columns={'date':'Date','open':'Bank_Open','high':'Bank_High','low':'Bank_Low','close':'Bank_Close'}, inplace=True)
     bank['Date'] = pd.to_datetime(bank['Date'])
     bank.set_index('Date', inplace=True)
-    
-    # Merge synchronously on the exact minute
+
+    # Merge Nifty + BankNifty
     df = nifty.join(bank[['Bank_Open', 'Bank_High', 'Bank_Low', 'Bank_Close']], how='inner')
     df.sort_index(inplace=True)
     df.dropna(inplace=True)
-    
-    print(f"Merged successfully: {len(df):,} synced minutes across both indices.")
+
+    # Merge India VIX
+    if os.path.exists(vix_path):
+        vix = pd.read_csv(vix_path, parse_dates=['date'])
+        vix.set_index('date', inplace=True)
+        df = df.join(vix[['close']].rename(columns={'close': 'VIX_Close'}), how='left')
+        df['VIX_Close'] = df['VIX_Close'].ffill()
+        print(f"Merged successfully: {len(df):,} synced minutes (Nifty + BankNifty + VIX).")
+    else:
+        print(f"Merged successfully: {len(df):,} synced minutes. (VIX not found)")
+
     return df
 
 def build_vectorized_rolling_candles(df):
@@ -76,14 +86,16 @@ def engineered_cross_features(df):
     CROSS_FEATURES = FEATURE_COLUMNS + ['feat_bank_spread', 'feat_bank_volatility']
     
     # Targets: 15 minutes forward (exactly 15 rows in minute data)
-    forward_bars = 15 
+    # Asymmetric: DOWN requires 30% bigger move to reduce false bearish labels.
+    forward_bars = 15
     threshold_pct = 0.08
-    
+    threshold_dn = threshold_pct * 1.3  # DOWN bar is higher (0.104%)
+
     close = df['Close']
     future_return = (close.shift(-forward_bars) - close) / close * 100
     df['target'] = 0
     df.loc[future_return > threshold_pct, 'target'] = 1
-    df.loc[future_return < -threshold_pct, 'target'] = -1
+    df.loc[future_return < -threshold_dn, 'target'] = -1
     
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df.dropna(subset=CROSS_FEATURES + ['target'], inplace=True)
@@ -111,8 +123,8 @@ def train_and_backtest(df, feature_cols):
     # We heavily penalize the model if it misses UP/DOWN moves
     weights = {i: total / (len(class_counts) * c) for i, c in enumerate(class_counts)}
     # Add a multiplier to explicitly force the model to be more aggressive on trends
-    weights[0] *= 2.0  # Double importance of DOWN
-    weights[2] *= 2.0  # Double importance of UP
+    weights[0] *= 0.7  # Reduce DOWN importance — suppress false bearish (BUY PE win rate was 47.9%)
+    weights[2] *= 2.0  # Double importance of UP (BUY CE win rate was 63.1%)
     weights[1] *= 0.5  # Halve the importance of SIDEWAYS
     
     sample_weights = np.array([weights[yi] for yi in y_train])
@@ -139,7 +151,8 @@ def train_and_backtest(df, feature_cols):
     print(f"=============================================")
     print(classification_report(y_test, y_pred, target_names=["DOWN", "SIDEWAYS", "UP"]))
     
-    model_path = os.path.join(MODEL_DIR, "nifty_cross_asset_model.pkl")
+    # Save — versioned to preserve old model
+    model_path = os.path.join(MODEL_DIR, "nifty_cross_asset_model-Rtr14April.pkl")
     joblib.dump(base_model, model_path)
     print(f"Aggressive Engine saved to {model_path}")
 
