@@ -33,7 +33,11 @@ func FetchOHLCV(ticker, interval, rangeVal string, ttl time.Duration) ([]models.
 	if err != nil {
 		return nil, fmt.Errorf("build request for %s: %w", ticker, err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Referer", "https://finance.yahoo.com/")
+	req.Header.Set("Origin", "https://finance.yahoo.com")
 
 	resp, err := client.Do(req)
 	if err != nil {
