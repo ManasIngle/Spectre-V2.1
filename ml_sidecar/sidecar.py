@@ -126,26 +126,20 @@ async def _fetch_vix() -> list:
 
 def build_rolling_bar(bars):
     """
-    Takes the last 5 1-minute candles and mathematically crushes them 
-    into a single 5-minute rolling structure.
+    Crush up to 5 1-minute candles into a single rolling 5-minute structure.
+    Works with fewer than 5 bars (e.g. first minutes of session).
     bars shape: [Close, High, Low, Open, Volume]
     """
-    if len(bars) < 5: return None
-    
-    recent_5 = np.array(bars[-5:])
-    c_ = recent_5[:,0]
-    h_ = recent_5[:,1]
-    l_ = recent_5[:,2]
-    o_ = recent_5[:,3]
-    v_ = recent_5[:,4]
-    
-    roll_o = o_[0]
-    roll_h = np.max(h_)
-    roll_l = np.min(l_)
-    roll_c = c_[-1]
-    roll_v = np.sum(v_)
-    
-    return [roll_c, roll_h, roll_l, roll_o, roll_v]
+    if len(bars) < 1: return None
+
+    recent = np.array(bars[-5:])  # use up to last 5, fewer is fine
+    c_ = recent[:,0]
+    h_ = recent[:,1]
+    l_ = recent[:,2]
+    o_ = recent[:,3]
+    v_ = recent[:,4]
+
+    return [c_[-1], np.max(h_), np.min(l_), o_[0], np.sum(v_)]
 
 def _extract_features(bars, feature_cols, vix_closes=None):
     import pandas as pd
@@ -153,15 +147,15 @@ def _extract_features(bars, feature_cols, vix_closes=None):
     from ta.momentum import RSIIndicator
     from ta.volatility import BollingerBands, AverageTrueRange
 
-    # We must construct a DataFrame out of sliding rolling bars over the 1m history
-    # so the indicators (like 14-period RSI) calculate correctly against rolling structures.
+    # Build rolling 5m bars from 1m history — works from minute 1.
+    # Early in session: fewer bars → more NaN features → filled to neutral via nan_to_num.
     rolling_history = []
-    for i in range(4, len(bars)):
-        r = build_rolling_bar(bars[i-4:i+1])
+    for i in range(len(bars)):
+        r = build_rolling_bar(bars[max(0, i-4):i+1])
         if r: rolling_history.append(r)
-        
+
     df = pd.DataFrame(rolling_history, columns=["Close","High","Low","Open","Volume"])
-    if len(df) < 50: return None, df
+    if len(df) < 2: return None, df  # need at least 2 rows for diff/pct_change
 
     c, h, l, v = df.Close, df.High, df.Low, df.Volume
     feat = {}
@@ -348,8 +342,8 @@ async def predict():
             q.get("volume", [1] * len(ts))
         )
 
-        if len(bars) < 55:
-            return {"error": f"insufficient bars from Yahoo: {len(bars)} (need 55+)"}
+        if len(bars) < 2:
+            return {"error": f"insufficient bars from Yahoo: {len(bars)} (need 2+)"}
 
         X, df_rolling = _extract_features(bars, _meta["feature_columns"], vix_closes=vix_closes)
         if X is None:
