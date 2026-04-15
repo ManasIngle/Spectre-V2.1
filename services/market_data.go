@@ -25,7 +25,7 @@ func FetchOHLCV(ticker, interval, rangeVal string, ttl time.Duration) ([]models.
 	}
 
 	url := fmt.Sprintf(
-		"https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=%s&range=%s",
+		"https://query2.finance.yahoo.com/v8/finance/chart/%s?interval=%s&range=%s",
 		ticker, interval, rangeVal,
 	)
 	client := yahooClient

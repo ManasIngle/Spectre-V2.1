@@ -98,14 +98,14 @@ def startup_load():
 import aiohttp, asyncio, pandas as pd
 
 async def _fetch_1m(ticker="%5ENSEI", days="1d"):
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range={days}"
+    url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range={days}"
     timeout = aiohttp.ClientTimeout(total=10)
     async with aiohttp.ClientSession(timeout=timeout) as s:
         async with s.get(url, headers={"User-Agent":"Mozilla/5.0"}) as r:
             return await r.json()
 
 async def _fetch_5m(ticker="%5ENSEI", days="5d"):
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=5m&range={days}"
+    url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=5m&range={days}"
     timeout = aiohttp.ClientTimeout(total=10)
     async with aiohttp.ClientSession(timeout=timeout) as s:
         async with s.get(url, headers={"User-Agent":"Mozilla/5.0"}) as r:
