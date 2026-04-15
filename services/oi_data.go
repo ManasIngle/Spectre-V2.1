@@ -21,6 +21,10 @@ var oiCache = NewTTLCache()
 
 const oiCacheTTL = 150 * time.Second // 2.5 min — NSE updates every 3 min
 
+// sidecarOIURL is where the Python sidecar serves OI data.
+// Python aiohttp bypasses Akamai TLS fingerprinting that blocks Go's net/http.
+const sidecarOIURL = "http://localhost:8240/oi"
+
 // Cookie state
 var (
 	nseCookies    []*http.Cookie
@@ -162,7 +166,13 @@ func FetchOIChain() (*models.OIChainData, error) {
 		return v.(*models.OIChainData), nil
 	}
 
-	// Ensure cookies are fresh
+	// Try sidecar first — Python aiohttp passes Akamai TLS check; Go net/http does not
+	if result, err := fetchOIViaSidecar(); err == nil {
+		oiCache.Set("oi", result, oiCacheTTL)
+		return result, nil
+	}
+
+	// Fallback: direct Go fetch
 	if err := refreshNSECookies(); err != nil {
 		return &models.OIChainData{Error: fmt.Sprintf("cookie refresh: %v", err)}, nil
 	}
@@ -175,27 +185,84 @@ func FetchOIChain() (*models.OIChainData, error) {
 			return result, nil
 		}
 		lastErr = err
-
-		// On auth error, force cookie refresh
 		if strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403") {
 			nseCookieMu.Lock()
-			nseCookieTime = time.Time{} // force refresh
+			nseCookieTime = time.Time{}
 			nseCookieMu.Unlock()
 			refreshNSECookies()
 			time.Sleep(time.Duration(1+attempt) * time.Second)
 			continue
 		}
-
-		// On rate limit, wait longer
 		if strings.Contains(err.Error(), "429") {
 			time.Sleep(time.Duration(3+attempt*2) * time.Second)
 			continue
 		}
-
 		time.Sleep(time.Second)
 	}
-
 	return &models.OIChainData{Error: fmt.Sprintf("after 3 retries: %v", lastErr)}, nil
+}
+
+func fetchOIViaSidecar() (*models.OIChainData, error) {
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Get(sidecarOIURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("sidecar OI returned %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	// Check for error field in response
+	var check struct {
+		Error   string `json:"error"`
+		Strikes []any  `json:"strikes"`
+	}
+	if err := json.Unmarshal(body, &check); err != nil {
+		return nil, err
+	}
+	if check.Error != "" {
+		return nil, fmt.Errorf("sidecar OI error: %s", check.Error)
+	}
+
+	// Parse into our model
+	var raw struct {
+		Underlying    float64 `json:"underlying"`
+		AtmStrike     float64 `json:"atm_strike"`
+		Expiry        string  `json:"expiry"`
+		Timestamp     string  `json:"timestamp"`
+		PCR           float64 `json:"pcr_oi"`
+		TotalCEOI     int64   `json:"total_ce_oi"`
+		TotalPEOI     int64   `json:"total_pe_oi"`
+		TotalCEOIChg  int64   `json:"total_ce_oi_chg"`
+		TotalPEOIChg  int64   `json:"total_pe_oi_chg"`
+		Strikes []struct {
+			Strike    float64 `json:"strike"`
+			CEOI      int64   `json:"CE_OI"`
+			CEOIChg   int64   `json:"CE_OI_Chg"`
+			CELTP     float64 `json:"CE_LTP"`
+			PEOI      int64   `json:"PE_OI"`
+			PEOIChg   int64   `json:"PE_OI_Chg"`
+			PELTP     float64 `json:"PE_LTP"`
+		} `json:"strikes"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, err
+	}
+	result := &models.OIChainData{
+		PCR: raw.PCR, TotalCEOI: raw.TotalCEOI, TotalPEOI: raw.TotalPEOI,
+		TotalCEOIChg: raw.TotalCEOIChg, TotalPEOIChg: raw.TotalPEOIChg,
+	}
+	for _, s := range raw.Strikes {
+		result.Strikes = append(result.Strikes, models.OptionStrike{
+			Strike: s.Strike, CEOI: s.CEOI, CEOIChg: s.CEOIChg, CELTP: s.CELTP,
+			PEOI: s.PEOI, PEOIChg: s.PEOIChg, PELTP: s.PELTP,
+		})
+	}
+	return result, nil
 }
 
 func fetchOIAttempt() (*models.OIChainData, error) {

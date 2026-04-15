@@ -95,7 +95,136 @@ def _load():
 def startup_load():
     _load()
 
-import aiohttp, asyncio, pandas as pd
+import aiohttp, asyncio, pandas as pd, random
+
+# ─── NSE OI Fetching (Python aiohttp — bypasses Akamai TLS fingerprint check) ─
+_NSE_COOKIES = {}
+_NSE_COOKIE_TIME = 0
+_NSE_COOKIE_TTL = 300
+_OI_CACHE = {"data": None, "expiry": 0}
+
+_BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Cache-Control": "max-age=0",
+    "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
+_API_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Referer": "https://www.nseindia.com/option-chain",
+    "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "X-Requested-With": "XMLHttpRequest",
+}
+
+async def _refresh_nse_cookies():
+    global _NSE_COOKIES, _NSE_COOKIE_TIME
+    jar = aiohttp.CookieJar()
+    connector = aiohttp.TCPConnector(ssl=False)
+    timeout = aiohttp.ClientTimeout(total=15)
+    try:
+        async with aiohttp.ClientSession(cookie_jar=jar, connector=connector, timeout=timeout) as s:
+            async with s.get("https://www.nseindia.com", headers=_BROWSER_HEADERS): pass
+            await asyncio.sleep(0.5 + random.random() * 0.5)
+            oc_hdrs = {**_BROWSER_HEADERS, "Referer": "https://www.nseindia.com/"}
+            async with s.get("https://www.nseindia.com/option-chain", headers=oc_hdrs): pass
+            cookies = {c.key: c.value for c in jar}
+            if cookies:
+                _NSE_COOKIES = cookies
+                _NSE_COOKIE_TIME = time.time()
+    except Exception as e:
+        print(f"NSE cookie refresh failed: {e}")
+
+async def _fetch_oi() -> dict:
+    global _NSE_COOKIES, _NSE_COOKIE_TIME, _OI_CACHE
+    now = time.time()
+    if _OI_CACHE["data"] and _OI_CACHE["expiry"] > now:
+        return _OI_CACHE["data"]
+    if not _NSE_COOKIES or (now - _NSE_COOKIE_TIME) > _NSE_COOKIE_TTL:
+        await _refresh_nse_cookies()
+
+    for attempt in range(3):
+        try:
+            connector = aiohttp.TCPConnector(ssl=False)
+            timeout = aiohttp.ClientTimeout(total=15)
+            cookie_str = "; ".join(f"{k}={v}" for k, v in _NSE_COOKIES.items())
+            hdrs = {**_API_HEADERS, "Cookie": cookie_str}
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as s:
+                # Step 1: nearest expiry
+                async with s.get("https://www.nseindia.com/api/option-chain-contract-info?symbol=NIFTY", headers=hdrs) as r:
+                    if r.status != 200:
+                        _NSE_COOKIES = {}
+                        await _refresh_nse_cookies()
+                        continue
+                    ci = await r.json(content_type=None)
+                    expiry_dates = ci.get("expiryDates", [])
+                    if not expiry_dates: continue
+                    nearest = expiry_dates[0]
+                await asyncio.sleep(0.2 + random.random() * 0.3)
+                # Step 2: option chain v3
+                v3_url = f"https://www.nseindia.com/api/option-chain-v3?type=Indices&symbol=NIFTY&expiry={nearest}"
+                async with s.get(v3_url, headers=hdrs) as r:
+                    if r.status in (401, 403):
+                        _NSE_COOKIES = {}
+                        await _refresh_nse_cookies()
+                        await asyncio.sleep(1 + attempt)
+                        continue
+                    if r.status != 200: continue
+                    raw = await r.json(content_type=None)
+                    records = raw.get("records", {})
+                    data = records.get("data", []) or raw.get("filtered", {}).get("data", [])
+                    underlying = records.get("underlyingValue", 0)
+                    atm = round(underlying / 50) * 50
+                    strikes, tot_ce, tot_pe, tot_ce_chg, tot_pe_chg = [], 0, 0, 0, 0
+                    for rec in data:
+                        sp = rec.get("strikePrice", 0)
+                        if not (atm - 1000 <= sp <= atm + 1000): continue
+                        ce, pe = rec.get("CE") or {}, rec.get("PE") or {}
+                        ce_oi = ce.get("openInterest", 0)
+                        pe_oi = pe.get("openInterest", 0)
+                        ce_chg = ce.get("changeinOpenInterest", 0)
+                        pe_chg = pe.get("changeinOpenInterest", 0)
+                        tot_ce += ce_oi; tot_pe += pe_oi
+                        tot_ce_chg += ce_chg; tot_pe_chg += pe_chg
+                        strikes.append({"strike": sp,
+                            "CE_OI": ce_oi, "CE_OI_Chg": ce_chg, "CE_LTP": ce.get("lastPrice", 0),
+                            "PE_OI": pe_oi, "PE_OI_Chg": pe_chg, "PE_LTP": pe.get("lastPrice", 0)})
+                    strikes.sort(key=lambda x: x["strike"])
+                    pcr = round(tot_pe / tot_ce, 2) if tot_ce > 0 else 0
+                    result = {"underlying": round(underlying, 2), "atm_strike": atm,
+                              "expiry": nearest, "timestamp": records.get("timestamp", ""),
+                              "pcr_oi": pcr, "total_ce_oi": tot_ce, "total_pe_oi": tot_pe,
+                              "total_ce_oi_chg": tot_ce_chg, "total_pe_oi_chg": tot_pe_chg,
+                              "strikes": strikes}
+                    _OI_CACHE = {"data": result, "expiry": now + 150}
+                    return result
+        except Exception as e:
+            print(f"OI attempt {attempt+1} failed: {e}")
+            await asyncio.sleep(1)
+    cached = _OI_CACHE.get("data")
+    return cached if cached else {"error": "NSE OI fetch failed after 3 attempts", "strikes": []}
+
+@app.get("/oi")
+async def get_oi():
+    return await _fetch_oi()
 
 async def _fetch_1m(ticker="%5ENSEI", days="1d"):
     url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range={days}"
