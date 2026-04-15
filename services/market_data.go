@@ -13,6 +13,9 @@ import (
 var marketCache = NewTTLCache()
 var yahooClient = &http.Client{Timeout: 12 * time.Second}
 
+// sidecarOHLCVURL — Python sidecar proxies Yahoo Finance to avoid TLS fingerprint block
+const sidecarOHLCVURL = "http://localhost:8240/ohlcv"
+
 func readBody(resp *http.Response, maxBytes int64) ([]byte, error) {
 	defer resp.Body.Close()
 	return io.ReadAll(io.LimitReader(resp.Body, maxBytes))
@@ -24,11 +27,64 @@ func FetchOHLCV(ticker, interval, rangeVal string, ttl time.Duration) ([]models.
 		return v.([]models.OHLCV), nil
 	}
 
+	// Try sidecar proxy first — Python aiohttp passes TLS check that Go net/http fails
+	if bars, err := fetchOHLCVViaSidecar(ticker, interval, rangeVal); err == nil && len(bars) > 0 {
+		marketCache.Set(cacheKey, bars, ttl)
+		return bars, nil
+	}
+
+	// Fallback: direct Go fetch
+	bars, err := fetchOHLCVDirect(ticker, interval, rangeVal)
+	if err != nil {
+		return nil, err
+	}
+	marketCache.Set(cacheKey, bars, ttl)
+	return bars, nil
+}
+
+func fetchOHLCVViaSidecar(ticker, interval, rangeVal string) ([]models.OHLCV, error) {
+	url := fmt.Sprintf("%s?ticker=%s&interval=%s&range=%s", sidecarOHLCVURL, ticker, interval, rangeVal)
+	resp, err := yahooClient.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := readBody(resp, 1<<20)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Error string `json:"error"`
+		Bars  []struct {
+			T int64   `json:"t"`
+			O float64 `json:"o"`
+			H float64 `json:"h"`
+			L float64 `json:"l"`
+			C float64 `json:"c"`
+			V float64 `json:"v"`
+		} `json:"bars"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+	if result.Error != "" {
+		return nil, fmt.Errorf("sidecar: %s", result.Error)
+	}
+	bars := make([]models.OHLCV, 0, len(result.Bars))
+	for _, b := range result.Bars {
+		if b.C == 0 {
+			continue
+		}
+		bars = append(bars, models.OHLCV{Time: b.T, Open: b.O, High: b.H, Low: b.L, Close: b.C, Volume: b.V})
+	}
+	return bars, nil
+}
+
+func fetchOHLCVDirect(ticker, interval, rangeVal string) ([]models.OHLCV, error) {
 	url := fmt.Sprintf(
 		"https://query2.finance.yahoo.com/v8/finance/chart/%s?interval=%s&range=%s",
 		ticker, interval, rangeVal,
 	)
-	client := yahooClient
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request for %s: %w", ticker, err)
@@ -39,7 +95,7 @@ func FetchOHLCV(ticker, interval, rangeVal string, ttl time.Duration) ([]models.
 	req.Header.Set("Referer", "https://finance.yahoo.com/")
 	req.Header.Set("Origin", "https://finance.yahoo.com")
 
-	resp, err := client.Do(req)
+	resp, err := yahooClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +107,6 @@ func FetchOHLCV(ticker, interval, rangeVal string, ttl time.Duration) ([]models.
 	if err != nil {
 		return nil, fmt.Errorf("read body for %s: %w", ticker, err)
 	}
-
 	type quoteBlock struct {
 		Open   []float64 `json:"open"`
 		High   []float64 `json:"high"`
@@ -70,20 +125,17 @@ func FetchOHLCV(ticker, interval, rangeVal string, ttl time.Duration) ([]models.
 			Result []resultBlock `json:"result"`
 		} `json:"chart"`
 	}
-
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("parse %s: %v", ticker, err)
 	}
 	if len(raw.Chart.Result) == 0 {
 		return nil, fmt.Errorf("no data for %s", ticker)
 	}
-
 	res := raw.Chart.Result[0]
 	if len(res.Indicators.Quote) == 0 {
 		return nil, fmt.Errorf("empty quote for %s", ticker)
 	}
 	q := res.Indicators.Quote[0]
-
 	var bars []models.OHLCV
 	for i, ts := range res.Timestamp {
 		if i >= len(q.Close) || q.Close[i] == 0 {
@@ -98,8 +150,6 @@ func FetchOHLCV(ticker, interval, rangeVal string, ttl time.Duration) ([]models.
 			Low: q.Low[i], Close: q.Close[i], Volume: vol,
 		})
 	}
-
-	marketCache.Set(cacheKey, bars, ttl)
 	return bars, nil
 }
 
