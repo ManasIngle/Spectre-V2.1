@@ -9,11 +9,24 @@ import TradeSignalsView from './components/TradeSignalsView'
 import InstitutionalView from './components/InstitutionalView'
 import NewsView from './components/NewsView'
 import MLLogsView from './components/MLLogsView'
+import CockpitView from './components/CockpitView'
 
 const API = ''
 
+const TABS = [
+  { key: 'cockpit',      label: 'Cockpit' },
+  { key: 'signals',      label: 'Trade Signals' },
+  { key: 'direction',    label: 'Market Direction' },
+  { key: 'oi',           label: 'OI Trending' },
+  { key: 'table',        label: 'Multitimeframe' },
+  { key: 'heatmap',      label: 'Heatmap' },
+  { key: 'institutional',label: 'Institutional' },
+  { key: 'news',         label: 'News' },
+  { key: 'ml-logs',      label: 'ML Logs' },
+]
+
 function App() {
-  const [view, setView] = useState('signals')
+  const [view, setView] = useState('cockpit')
   const [interval, setIntervalVal] = useState('3m')
   const [data, setData] = useState([])
   const [heatmapData, setHeatmapData] = useState([])
@@ -56,14 +69,14 @@ function App() {
       } else if (view === 'heatmap') {
         await fetchHeatmap()
       }
-      // OI view manages its own refresh internally
+      // OI, cockpit, signals, direction, institutional manage their own refresh
       setLoading(false)
     }
 
     doFetch()
 
-    // Auto-refresh: 30s for trader view, 3 min for heatmap, OI handles itself
-    if (view !== 'oi') {
+    // Auto-refresh: 30s for trader view, 3 min for heatmap, others handle themselves
+    if (view !== 'oi' && view !== 'cockpit' && view !== 'signals' && view !== 'direction' && view !== 'institutional') {
       const refreshMs = view === 'table' ? 30000 : 180000
       timerRef.current = setInterval(doFetch, refreshMs)
     }
@@ -96,17 +109,20 @@ function App() {
             </span>
           )}
 
-          <select className="dropdown" value={view} onChange={(e) => setView(e.target.value)}>
-            <option value="table">📊 Multitimeframe Indicators</option>
-            <option value="heatmap">🗺️ NSE Market Heatmap</option>
-            <option value="oi">📈 Nifty OI Trending</option>
-            <option value="direction">🎯 Market Direction</option>
-            <option value="signals">🤖 Trade Signals (ML)</option>
-            <option value="ml-logs">📝 ML Trade Logs (Raw)</option>
-            <option value="institutional">🏦 Institutional Outlook</option>
-            <option value="news">📰 Breaking News</option>
-          </select>
+          {/* Horizontal pill tabs */}
+          <nav className="nav-tabs">
+            {TABS.map(tab => (
+              <button
+                key={tab.key}
+                className={`nav-tab${view === tab.key ? ' active' : ''}`}
+                onClick={() => setView(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
 
+          {/* Interval selector only for Multitimeframe view */}
           {view === 'table' && (
             <select className="dropdown" value={interval} onChange={(e) => setIntervalVal(e.target.value)}>
               <option value="1m">1 Min</option>
@@ -123,7 +139,9 @@ function App() {
       </header>
 
       <main className="main-content">
-        {view === 'table' ? (
+        {view === 'cockpit' ? (
+          <CockpitView />
+        ) : view === 'table' ? (
           <TraderViewTable data={data} interval={interval} />
         ) : view === 'heatmap' ? (
           <Heatmap data={heatmapData} total={heatmapMeta.total} requested={heatmapMeta.requested} />

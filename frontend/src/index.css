@@ -325,6 +325,65 @@ tbody tr:last-child td {
   }
 }
 
+/* ── Nav tabs ── */
+.nav-tabs { display: flex; gap: 0.25rem; align-items: center; flex-wrap: wrap; }
+.nav-tab {
+  padding: 0.3rem 0.75rem; border-radius: 6px; border: 1px solid transparent;
+  font-size: 0.75rem; font-weight: 600; cursor: pointer;
+  color: var(--text-secondary); background: transparent;
+  transition: all 0.15s ease; white-space: nowrap;
+  font-family: inherit; letter-spacing: 0.02em;
+}
+.nav-tab:hover { background: var(--bg-surface-hover); color: var(--text-primary); }
+.nav-tab.active {
+  background: var(--bg-surface-hover); color: var(--text-primary);
+  border-color: var(--border-color);
+}
+
+/* ── Cockpit grid ── */
+.cockpit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.9fr 1fr;
+  gap: 0.85rem;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .cockpit-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 700px) {
+  .cockpit-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Cockpit panel ── */
+.cpanel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.cpanel-header {
+  padding: 0.45rem 0.85rem;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+.cpanel-body { padding: 0.85rem; }
+
+/* ── Mini bar ── */
+.mini-bar-track { height: 4px; background: var(--border-color); border-radius: 2px; overflow: hidden; }
+.mini-bar-fill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+
+/* ── Score slider ── */
+.score-slider {
+  height: 5px;
+  background: linear-gradient(90deg, #ef4444 0%, #f59e0b 40%, #10b981 100%);
+  border-radius: 3px;
+  position: relative;
+}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar {
   width: 6px;
