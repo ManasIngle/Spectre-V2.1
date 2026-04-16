@@ -1,0 +1,25 @@
+# Spectre ML Sidecar — Python dependencies
+# Install: pip install -r requirements.txt
+
+# Web framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# HTTP client (used for NSE OI + Yahoo Finance proxying — passes Akamai TLS check)
+aiohttp==3.10.5
+
+# ML — core
+xgboost==2.1.1
+scikit-learn==1.5.2
+joblib==1.4.2
+
+# ML — deep learning (scalper LSTM)
+tensorflow==2.17.0
+
+# Feature engineering
+ta==0.11.0
+pandas==2.2.3
+numpy==1.26.4
+
+# Utilities
+yarl==1.9.4
