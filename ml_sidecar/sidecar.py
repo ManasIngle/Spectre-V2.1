@@ -137,19 +137,31 @@ _API_HEADERS = {
 
 async def _refresh_nse_cookies():
     global _NSE_COOKIES, _NSE_COOKIE_TIME
-    jar = aiohttp.CookieJar()
+    # Use unsafe=True so aiohttp accepts cookies from IP-based URLs too
+    jar = aiohttp.CookieJar(unsafe=True)
     connector = aiohttp.TCPConnector(ssl=False)
-    timeout = aiohttp.ClientTimeout(total=15)
+    timeout = aiohttp.ClientTimeout(total=20)
     try:
         async with aiohttp.ClientSession(cookie_jar=jar, connector=connector, timeout=timeout) as s:
-            async with s.get("https://www.nseindia.com", headers=_BROWSER_HEADERS): pass
-            await asyncio.sleep(0.5 + random.random() * 0.5)
+            async with s.get("https://www.nseindia.com", headers=_BROWSER_HEADERS) as r:
+                await r.read()  # consume body so connection is released
+            await asyncio.sleep(0.6 + random.random() * 0.6)
             oc_hdrs = {**_BROWSER_HEADERS, "Referer": "https://www.nseindia.com/"}
-            async with s.get("https://www.nseindia.com/option-chain", headers=oc_hdrs): pass
-            cookies = {c.key: c.value for c in jar}
-            if cookies:
-                _NSE_COOKIES = cookies
-                _NSE_COOKIE_TIME = time.time()
+            async with s.get("https://www.nseindia.com/option-chain", headers=oc_hdrs) as r:
+                await r.read()
+
+        # Extract cookies from the jar — filter_cookies returns a SimpleCookie for the URL
+        from http.cookies import SimpleCookie
+        import yarl
+        nse_url = yarl.URL("https://www.nseindia.com")
+        filtered = jar.filter_cookies(nse_url)
+        cookies = {k: v.value for k, v in filtered.items()}
+        if cookies:
+            _NSE_COOKIES = cookies
+            _NSE_COOKIE_TIME = time.time()
+            print(f"NSE cookies refreshed: {list(cookies.keys())}")
+        else:
+            print("NSE cookie refresh: no cookies received")
     except Exception as e:
         print(f"NSE cookie refresh failed: {e}")
 
@@ -163,62 +175,81 @@ async def _fetch_oi() -> dict:
 
     for attempt in range(3):
         try:
-            connector = aiohttp.TCPConnector(ssl=False)
-            timeout = aiohttp.ClientTimeout(total=15)
             cookie_str = "; ".join(f"{k}={v}" for k, v in _NSE_COOKIES.items())
             hdrs = {**_API_HEADERS, "Cookie": cookie_str}
+            connector = aiohttp.TCPConnector(ssl=False)
+            timeout = aiohttp.ClientTimeout(total=20)
+
+            # Step 1: get nearest expiry — separate session to avoid shared-connection issues
+            nearest = None
             async with aiohttp.ClientSession(connector=connector, timeout=timeout) as s:
-                # Step 1: nearest expiry
                 async with s.get("https://www.nseindia.com/api/option-chain-contract-info?symbol=NIFTY", headers=hdrs) as r:
                     if r.status != 200:
+                        print(f"OI contract-info HTTP {r.status} on attempt {attempt+1}")
                         _NSE_COOKIES = {}
                         await _refresh_nse_cookies()
+                        cookie_str = "; ".join(f"{k}={v}" for k, v in _NSE_COOKIES.items())
+                        hdrs = {**_API_HEADERS, "Cookie": cookie_str}
+                        await asyncio.sleep(1 + attempt)
                         continue
                     ci = await r.json(content_type=None)
                     expiry_dates = ci.get("expiryDates", [])
-                    if not expiry_dates: continue
+                    if not expiry_dates:
+                        print(f"OI: no expiry dates returned on attempt {attempt+1}")
+                        continue
                     nearest = expiry_dates[0]
-                await asyncio.sleep(0.2 + random.random() * 0.3)
-                # Step 2: option chain v3
-                v3_url = f"https://www.nseindia.com/api/option-chain-v3?type=Indices&symbol=NIFTY&expiry={nearest}"
-                async with s.get(v3_url, headers=hdrs) as r:
+
+            if not nearest:
+                continue
+
+            await asyncio.sleep(0.3 + random.random() * 0.4)
+
+            # Step 2: fetch option chain v3 — fresh session
+            v3_url = f"https://www.nseindia.com/api/option-chain-v3?type=Indices&symbol=NIFTY&expiry={nearest}"
+            connector2 = aiohttp.TCPConnector(ssl=False)
+            async with aiohttp.ClientSession(connector=connector2, timeout=timeout) as s2:
+                async with s2.get(v3_url, headers=hdrs) as r:
                     if r.status in (401, 403):
+                        print(f"OI v3 chain HTTP {r.status} — refreshing cookies")
                         _NSE_COOKIES = {}
                         await _refresh_nse_cookies()
                         await asyncio.sleep(1 + attempt)
                         continue
-                    if r.status != 200: continue
+                    if r.status != 200:
+                        print(f"OI v3 chain HTTP {r.status} on attempt {attempt+1}")
+                        continue
                     raw = await r.json(content_type=None)
-                    records = raw.get("records", {})
-                    data = records.get("data", []) or raw.get("filtered", {}).get("data", [])
-                    underlying = records.get("underlyingValue", 0)
-                    atm = round(underlying / 50) * 50
-                    strikes, tot_ce, tot_pe, tot_ce_chg, tot_pe_chg = [], 0, 0, 0, 0
-                    for rec in data:
-                        sp = rec.get("strikePrice", 0)
-                        if not (atm - 1000 <= sp <= atm + 1000): continue
-                        ce, pe = rec.get("CE") or {}, rec.get("PE") or {}
-                        ce_oi = ce.get("openInterest", 0)
-                        pe_oi = pe.get("openInterest", 0)
-                        ce_chg = ce.get("changeinOpenInterest", 0)
-                        pe_chg = pe.get("changeinOpenInterest", 0)
-                        tot_ce += ce_oi; tot_pe += pe_oi
-                        tot_ce_chg += ce_chg; tot_pe_chg += pe_chg
-                        strikes.append({"strike": sp,
-                            "CE_OI": ce_oi, "CE_OI_Chg": ce_chg, "CE_LTP": ce.get("lastPrice", 0),
-                            "PE_OI": pe_oi, "PE_OI_Chg": pe_chg, "PE_LTP": pe.get("lastPrice", 0)})
-                    strikes.sort(key=lambda x: x["strike"])
-                    pcr = round(tot_pe / tot_ce, 2) if tot_ce > 0 else 0
-                    result = {"underlying": round(underlying, 2), "atm_strike": atm,
-                              "expiry": nearest, "timestamp": records.get("timestamp", ""),
-                              "pcr_oi": pcr, "total_ce_oi": tot_ce, "total_pe_oi": tot_pe,
-                              "total_ce_oi_chg": tot_ce_chg, "total_pe_oi_chg": tot_pe_chg,
-                              "strikes": strikes}
-                    _OI_CACHE = {"data": result, "expiry": now + 150}
-                    return result
+
+            records = raw.get("records", {})
+            data = records.get("data", []) or raw.get("filtered", {}).get("data", [])
+            underlying = records.get("underlyingValue", 0)
+            atm = round(underlying / 50) * 50
+            strikes, tot_ce, tot_pe, tot_ce_chg, tot_pe_chg = [], 0, 0, 0, 0
+            for rec in data:
+                sp = rec.get("strikePrice", 0)
+                if not (atm - 1000 <= sp <= atm + 1000): continue
+                ce, pe = rec.get("CE") or {}, rec.get("PE") or {}
+                ce_oi = ce.get("openInterest", 0)
+                pe_oi = pe.get("openInterest", 0)
+                ce_chg = ce.get("changeinOpenInterest", 0)
+                pe_chg = pe.get("changeinOpenInterest", 0)
+                tot_ce += ce_oi; tot_pe += pe_oi
+                tot_ce_chg += ce_chg; tot_pe_chg += pe_chg
+                strikes.append({"strike": sp,
+                    "CE_OI": ce_oi, "CE_OI_Chg": ce_chg, "CE_LTP": ce.get("lastPrice", 0),
+                    "PE_OI": pe_oi, "PE_OI_Chg": pe_chg, "PE_LTP": pe.get("lastPrice", 0)})
+            strikes.sort(key=lambda x: x["strike"])
+            pcr = round(tot_pe / tot_ce, 2) if tot_ce > 0 else 0
+            result = {"underlying": round(underlying, 2), "atm_strike": atm,
+                      "expiry": nearest, "timestamp": records.get("timestamp", ""),
+                      "pcr_oi": pcr, "total_ce_oi": tot_ce, "total_pe_oi": tot_pe,
+                      "total_ce_oi_chg": tot_ce_chg, "total_pe_oi_chg": tot_pe_chg,
+                      "strikes": strikes}
+            _OI_CACHE = {"data": result, "expiry": now + 150}
+            return result
         except Exception as e:
             print(f"OI attempt {attempt+1} failed: {e}")
-            await asyncio.sleep(1)
+            await asyncio.sleep(1 + attempt)
     cached = _OI_CACHE.get("data")
     return cached if cached else {"error": "NSE OI fetch failed after 3 attempts", "strikes": []}
 
