@@ -41,6 +41,11 @@ _cross_xgb = None
 _meta = None
 _old_meta = None
 
+# 3-Minute Scalper LSTM
+_scalper_lstm = None
+_scalper_scaler = None
+_scalper_meta = None
+
 def _load():
     global _rolling_xgb, _direction_xgb, _old_direction_xgb, _cross_xgb, _meta, _old_meta
 
@@ -90,6 +95,23 @@ def _load():
     if os.path.exists(old_meta_path):
         with open(old_meta_path) as f: _old_meta = json.load(f)
         print(f"Loaded old metadata: {old_meta_path}")
+
+    # 3-Minute Scalper LSTM
+    global _scalper_lstm, _scalper_scaler, _scalper_meta
+    scalper_model_path  = os.path.join(ML_DIR, f"nifty_scalper_lstm{VER}.keras")
+    scalper_scaler_path = os.path.join(ML_DIR, f"nifty_scalper_scaler{VER}.pkl")
+    scalper_meta_path   = os.path.join(ML_DIR, f"nifty_scalper_meta{VER}.json")
+    if os.path.exists(scalper_model_path) and os.path.exists(scalper_scaler_path) and os.path.exists(scalper_meta_path):
+        try:
+            import tensorflow as tf
+            _scalper_lstm   = tf.keras.models.load_model(scalper_model_path)
+            _scalper_scaler = joblib.load(scalper_scaler_path)
+            with open(scalper_meta_path) as f: _scalper_meta = json.load(f)
+            print(f"Loaded 3m scalper LSTM: {scalper_model_path} ({_scalper_meta.get('n_features')} features, acc={_scalper_meta.get('accuracy')}%)")
+        except Exception as e:
+            print(f"Scalper LSTM load failed: {e}")
+    else:
+        print(f"Scalper LSTM not found at {scalper_model_path} — run train_scalper_lstm.py to generate")
 
 @app.on_event("startup")
 def startup_load():
@@ -671,8 +693,285 @@ async def predict():
         import traceback
         return {"error": str(e), "trace": traceback.format_exc()}
 
+def _build_scalper_features(bars_1m: list, vix_closes: list, sector_data: dict, feat_cols: list) -> np.ndarray | None:
+    """
+    Build the 42-feature sequence matrix for the 3-minute scalper LSTM.
+    bars_1m: list of (close, high, low, open, volume) tuples, 1-minute resolution
+    Returns: (seq_len, n_features) numpy array, or None if insufficient data
+    """
+    from ta.momentum import RSIIndicator, StochasticOscillator
+    from ta.trend import ADXIndicator, MACD, EMAIndicator
+    from ta.volatility import AverageTrueRange, BollingerBands
+
+    SEQ_LEN = _scalper_meta["seq_len"]
+    if len(bars_1m) < 2:
+        return None
+
+    # Build DataFrame from raw 1m bars
+    df = pd.DataFrame(bars_1m, columns=["Close", "High", "Low", "Open", "Volume"])
+    df = df.astype(float)
+    close = df["Close"]; high = df["High"]; low = df["Low"]
+
+    # ── Feature matrix: one row per 1m bar ──
+    feat_df = pd.DataFrame(index=df.index)
+
+    # Returns
+    feat_df["f_ret1"]  = close.pct_change(1) * 100
+    feat_df["f_ret2"]  = close.pct_change(2) * 100
+    feat_df["f_ret3"]  = close.pct_change(3) * 100
+    feat_df["f_ret5"]  = close.pct_change(5) * 100
+    feat_df["f_ret10"] = close.pct_change(10) * 100
+
+    # Candle shape
+    feat_df["f_body_pct"]   = ((close - df["Open"]) / df["Open"] * 100).fillna(0)
+    feat_df["f_upper_wick"] = ((high - close.clip(lower=df["Open"])) / df["Open"] * 100).fillna(0)
+    feat_df["f_lower_wick"] = ((close.clip(upper=df["Open"]) - low) / df["Open"] * 100).fillna(0)
+    feat_df["f_hl_range"]   = ((high - low) / close * 100).fillna(0)
+
+    # RSI
+    try:
+        feat_df["f_rsi14"]    = RSIIndicator(close, 14).rsi()
+        feat_df["f_rsi7"]     = RSIIndicator(close, 7).rsi()
+        feat_df["f_rsi_delta"]= feat_df["f_rsi14"].diff(1)
+    except:
+        feat_df["f_rsi14"] = feat_df["f_rsi7"] = 50.0
+        feat_df["f_rsi_delta"] = 0.0
+
+    # MACD
+    try:
+        macd = MACD(close, window_slow=26, window_fast=12, window_sign=9)
+        feat_df["f_macd_hist"]  = macd.macd_diff()
+        feat_df["f_macd_delta"] = feat_df["f_macd_hist"].diff(1)
+    except:
+        feat_df["f_macd_hist"] = feat_df["f_macd_delta"] = 0.0
+
+    # EMA spreads
+    try:
+        ema5  = EMAIndicator(close, 5).ema_indicator()
+        ema9  = EMAIndicator(close, 9).ema_indicator()
+        ema21 = EMAIndicator(close, 21).ema_indicator()
+        feat_df["f_ema5_9_spread"]  = (ema5 - ema9) / close * 100
+        feat_df["f_ema9_21_spread"] = (ema9 - ema21) / close * 100
+        feat_df["f_price_vs_ema9"]  = (close - ema9) / close * 100
+        feat_df["f_price_vs_ema21"] = (close - ema21) / close * 100
+    except:
+        feat_df["f_ema5_9_spread"] = feat_df["f_ema9_21_spread"] = 0.0
+        feat_df["f_price_vs_ema9"] = feat_df["f_price_vs_ema21"] = 0.0
+
+    # ATR
+    try:
+        atr = AverageTrueRange(high, low, close, 14).average_true_range()
+        feat_df["f_atr_pct"]    = (atr / close * 100)
+        feat_df["f_atr_move"]   = ((close - close.shift(1)) / atr).fillna(0)
+        atr_ma50 = atr.rolling(50).mean()
+        feat_df["f_atr_regime"] = (atr / atr_ma50).fillna(1.0)
+    except:
+        feat_df["f_atr_pct"] = feat_df["f_atr_move"] = feat_df["f_atr_regime"] = 1.0
+
+    # Bollinger
+    try:
+        bb = BollingerBands(close, 20, 2)
+        bb_range = bb.bollinger_hband() - bb.bollinger_lband()
+        feat_df["f_bb_pos"]   = np.where(bb_range > 0, (close - bb.bollinger_lband()) / bb_range, 0.5)
+        feat_df["f_bb_width"] = bb_range / close * 100
+    except:
+        feat_df["f_bb_pos"] = 0.5; feat_df["f_bb_width"] = 1.0
+
+    # Stochastic
+    try:
+        stoch = StochasticOscillator(high, low, close, 14, 3)
+        feat_df["f_stoch_k"] = stoch.stoch()
+        feat_df["f_stoch_d"] = stoch.stoch_signal()
+    except:
+        feat_df["f_stoch_k"] = feat_df["f_stoch_d"] = 50.0
+
+    # ADX
+    try:
+        adx = ADXIndicator(high, low, close, 14)
+        feat_df["f_adx"]     = adx.adx()
+        feat_df["f_di_diff"] = adx.adx_pos() - adx.adx_neg()
+    except:
+        feat_df["f_adx"] = 25.0; feat_df["f_di_diff"] = 0.0
+
+    # Momentum streaks
+    try:
+        ret_sign = np.sign(close.pct_change())
+        up = (ret_sign > 0).astype(int)
+        dn = (ret_sign < 0).astype(int)
+        feat_df["f_consec_up"]   = up.groupby((up != up.shift()).cumsum()).cumsum() * up
+        feat_df["f_consec_down"] = dn.groupby((dn != dn.shift()).cumsum()).cumsum() * dn
+    except:
+        feat_df["f_consec_up"] = feat_df["f_consec_down"] = 0.0
+
+    # Session position — use bar index as proxy (bar 0 = open, bar 374 = close)
+    n = len(df)
+    feat_df["f_session_pos"] = pd.Series(
+        [(max(0, min(374, n - (n - i)))) / 374 for i in range(n)],
+        index=df.index
+    )
+
+    # VIX
+    if vix_closes and len(vix_closes) >= 2:
+        vix_s = pd.Series(vix_closes[-n:] if len(vix_closes) >= n else vix_closes)
+        # Pad/align to same length as df
+        vix_aligned = pd.Series(vix_s.values, index=range(len(vix_s))).reindex(range(n)).ffill().bfill()
+        vix_aligned = vix_aligned.fillna(16.0)
+        vix_ma20 = vix_aligned.rolling(20).mean().fillna(vix_aligned.mean())
+        feat_df["f_vix"]        = vix_aligned.values
+        feat_df["f_vix_chg"]    = vix_aligned.pct_change(1).fillna(0) * 100
+        feat_df["f_vix_vs_avg"] = ((vix_aligned - vix_ma20) / vix_ma20.replace(0, 1) * 100).fillna(0)
+        feat_df["f_vix_regime"] = pd.cut(vix_aligned, bins=[0,13,20,30,10000],
+                                          labels=[0,1,2,3]).astype(float).fillna(1.0).values
+    else:
+        feat_df["f_vix"] = 16.0; feat_df["f_vix_chg"] = 0.0
+        feat_df["f_vix_vs_avg"] = 0.0; feat_df["f_vix_regime"] = 1.0
+
+    # Sector relative returns + breadth
+    sec_keys = _scalper_meta.get("sector_keys", [])
+    breadth_cols = []
+    for key in sec_keys:
+        col = f"f_sec_{key}_rel"
+        if key in sector_data and len(sector_data[key]) >= 2:
+            sec_closes = pd.Series(sector_data[key])
+            sec_ret = sec_closes.pct_change(1).fillna(0) * 100
+            # Align to df length
+            sec_ret_aligned = sec_ret.reindex(range(n)).ffill().bfill().fillna(0)
+            nifty_ret = feat_df["f_ret1"].fillna(0)
+            rel = (sec_ret_aligned.values - nifty_ret.values)
+            feat_df[col] = rel
+            breadth_cols.append(col)
+            feat_df[f"_adv_{key}"] = (sec_ret_aligned.values > 0).astype(float)
+        else:
+            feat_df[col] = 0.0
+            feat_df[f"_adv_{key}"] = 0.5
+
+    adv_cols = [f"_adv_{k}" for k in sec_keys]
+    feat_df["f_breadth_score"] = feat_df[adv_cols].sum(axis=1) if adv_cols else 0.0
+
+    # Align columns to training feature order and fill NaN
+    X_mat = feat_df[feat_cols].values.astype(np.float32)
+    X_mat = np.nan_to_num(X_mat, nan=0.0, posinf=0.0, neginf=0.0)
+
+    # Scale
+    X_scaled = _scalper_scaler.transform(X_mat)
+
+    # Build sequence: take last SEQ_LEN rows
+    if len(X_scaled) < SEQ_LEN:
+        # Pad start with first row
+        pad = np.tile(X_scaled[0], (SEQ_LEN - len(X_scaled), 1))
+        X_scaled = np.vstack([pad, X_scaled])
+
+    seq = X_scaled[-SEQ_LEN:][np.newaxis, :, :]  # shape (1, SEQ_LEN, n_features)
+    return seq.astype(np.float32)
+
+
+@app.get("/predict-scalper")
+async def predict_scalper():
+    """
+    3-Minute Scalper LSTM endpoint.
+    Fetches live 1m data, sector closes, and VIX, then runs the scalper LSTM.
+    Returns: signal (UP/DOWN/SIDEWAYS), probs [P_side, P_up, P_down], confidence.
+    """
+    try:
+        if _scalper_lstm is None or _scalper_scaler is None or _scalper_meta is None:
+            return {"error": "scalper model not loaded — run train_scalper_lstm.py first"}
+
+        feat_cols  = _scalper_meta["feature_columns"]
+        sec_keys   = _scalper_meta.get("sector_keys", [])
+
+        # Fetch all data in parallel: Nifty 1m + each sector + VIX
+        sector_tickers = {
+            "bank": "%5ENSEBANK",
+            "it":   "^CNXIT",
+            "fin":  "NIFTY_FIN_SERVICE.NS",
+            "auto": "^CNXAUTO",
+            "fmcg": "^CNXFMCG",
+        }
+
+        async def fetch_sector(ticker):
+            try:
+                url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range=1d"
+                timeout = aiohttp.ClientTimeout(total=8)
+                async with aiohttp.ClientSession(timeout=timeout) as s:
+                    async with s.get(url, headers=_YAHOO_HEADERS) as r:
+                        if r.status != 200: return []
+                        data = await r.json(content_type=None)
+                res = data.get("chart", {}).get("result", [])
+                if not res: return []
+                q = res[0]["indicators"]["quote"][0]
+                return [v for v in q.get("close", []) if v is not None]
+            except:
+                return []
+
+        tasks = [_fetch_1m("%5ENSEI", "1d"), _fetch_vix()]
+        for key in sec_keys:
+            ticker = sector_tickers.get(key, "")
+            if ticker:
+                tasks.append(fetch_sector(ticker))
+            else:
+                tasks.append(asyncio.coroutine(lambda: [])())
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        raw_nifty = results[0] if not isinstance(results[0], Exception) else {}
+        vix_closes = results[1] if not isinstance(results[1], Exception) else []
+        sector_data = {}
+        for i, key in enumerate(sec_keys):
+            val = results[2 + i]
+            sector_data[key] = val if not isinstance(val, Exception) else []
+
+        if "chart" not in raw_nifty or not raw_nifty["chart"].get("result"):
+            return {"error": "Yahoo Finance returned no Nifty 1m data"}
+
+        result = raw_nifty["chart"]["result"][0]
+        q = result["indicators"]["quote"][0]
+        bars_1m = _clean_bars(
+            q.get("close", []), q.get("high", []), q.get("low", []),
+            q.get("open", q.get("close", [])),
+            q.get("volume", [1] * len(result.get("timestamp", [])))
+        )
+
+        if len(bars_1m) < 2:
+            return {"error": f"insufficient 1m bars: {len(bars_1m)}"}
+
+        seq = _build_scalper_features(bars_1m, vix_closes, sector_data, feat_cols)
+        if seq is None:
+            return {"error": "feature extraction failed"}
+
+        probs = _scalper_lstm.predict(seq, verbose=0)[0].tolist()  # [P_side, P_up, P_dn]
+        pred_idx = int(np.argmax(probs))
+        classes = _scalper_meta.get("classes", ["SIDEWAYS", "UP", "DOWN"])
+        pred_label = classes[pred_idx]
+        confidence = round(probs[pred_idx] * 100, 1)
+
+        # Map to trading signal
+        signal = "NO TRADE"
+        if pred_label == "UP" and confidence > 40:
+            signal = "BUY CE"
+        elif pred_label == "DOWN" and confidence > 45:  # higher bar for bearish
+            signal = "BUY PE"
+
+        return {
+            "signal":          signal,
+            "prediction":      pred_label,
+            "confidence":      confidence,
+            "probs": {
+                "sideways": round(probs[0] * 100, 1),
+                "up":       round(probs[1] * 100, 1),
+                "down":     round(probs[2] * 100, 1),
+            },
+            "horizon_minutes": _scalper_meta["forward_bars"],
+            "seq_len_used":    _scalper_meta["seq_len"],
+            "model_accuracy":  _scalper_meta.get("accuracy", 0),
+            "bars_available":  len(bars_1m),
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "trace": traceback.format_exc()}
+
+
 @app.get("/health")
-def health(): return {"status":"ok","rolling_model_loaded":_rolling_xgb is not None, "cross_model_loaded": _cross_xgb is not None, "old_model_loaded": _old_direction_xgb is not None}
+def health(): return {"status":"ok","rolling_model_loaded":_rolling_xgb is not None, "cross_model_loaded": _cross_xgb is not None, "old_model_loaded": _old_direction_xgb is not None, "scalper_loaded": _scalper_lstm is not None}
 
 @app.get("/morning-predict")
 async def morning_predict():

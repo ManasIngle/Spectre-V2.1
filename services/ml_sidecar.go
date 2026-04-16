@@ -37,6 +37,59 @@ type MLPrediction struct {
 
 var mlClient = &http.Client{Timeout: 8 * time.Second}
 
+// ScalperPrediction is the response from the 3-minute scalper LSTM endpoint.
+type ScalperPrediction struct {
+	Signal         string             `json:"signal"`
+	Prediction     string             `json:"prediction"`
+	Confidence     float64            `json:"confidence"`
+	Probs          ScalperProbs       `json:"probs"`
+	HorizonMinutes int                `json:"horizon_minutes"`
+	SeqLenUsed     int                `json:"seq_len_used"`
+	ModelAccuracy  float64            `json:"model_accuracy"`
+	BarsAvailable  int                `json:"bars_available"`
+	Error          string             `json:"error,omitempty"`
+}
+
+type ScalperProbs struct {
+	Sideways float64 `json:"sideways"`
+	Up       float64 `json:"up"`
+	Down     float64 `json:"down"`
+}
+
+var scalperCache = NewTTLCache()
+
+// FetchScalperPrediction calls /predict-scalper on the Python sidecar.
+func FetchScalperPrediction() (*ScalperPrediction, error) {
+	if v, ok := scalperCache.Get("scalper"); ok {
+		return v.(*ScalperPrediction), nil
+	}
+	resp, err := mlClient.Get("http://ml-sidecar:8240/predict-scalper")
+	if err != nil {
+		// try localhost fallback
+		resp, err = mlClient.Get("http://localhost:8240/predict-scalper")
+		if err != nil {
+			return nil, fmt.Errorf("scalper sidecar unreachable: %v", err)
+		}
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("scalper sidecar returned HTTP %d", resp.StatusCode)
+	}
+	body, err := readBody(resp, 1<<20)
+	if err != nil {
+		return nil, fmt.Errorf("scalper sidecar read error: %w", err)
+	}
+	var pred ScalperPrediction
+	if err := json.Unmarshal(body, &pred); err != nil {
+		return nil, fmt.Errorf("scalper sidecar parse error: %v", err)
+	}
+	if pred.Error != "" {
+		return nil, fmt.Errorf("scalper sidecar error: %s", pred.Error)
+	}
+	scalperCache.Set("scalper", &pred, 55*time.Second) // cache for ~1 bar
+	return &pred, nil
+}
+
 func CheckSidecarHealth() (bool, error) {
 	resp, err := mlClient.Get("http://ml-sidecar:8240/health")
 	if err != nil {

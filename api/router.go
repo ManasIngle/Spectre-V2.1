@@ -36,6 +36,7 @@ func NewRouter() *gin.Engine {
 		api.POST("/stability-reset", guardReset, handlers.ResetStability)
 		api.GET("/ml-logs", handlers.GetMLLogs)
 		api.GET("/ml-logs/download", handlers.DownloadMLLogs)
+		api.GET("/scalper-signal", handlers.GetScalperSignal)
 	}
 
 	return r
