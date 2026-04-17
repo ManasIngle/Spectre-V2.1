@@ -25,6 +25,28 @@ const oiCacheTTL = 150 * time.Second // 2.5 min — NSE updates every 3 min
 // Python aiohttp bypasses Akamai TLS fingerprinting that blocks Go's net/http.
 const sidecarOIURL = "http://localhost:8240/oi"
 
+func init() {
+	go oiRetryLoop()
+}
+
+// oiRetryLoop keeps trying to fetch OI every 15s until data is in cache,
+// then lets the normal TTL take over (re-fetches only when cache expires).
+func oiRetryLoop() {
+	for {
+		if _, ok := oiCache.Get("oi"); ok {
+			// Cache is warm — sleep until it would expire, then try again
+			time.Sleep(oiCacheTTL)
+			continue
+		}
+		// No data yet — try aggressively
+		if result, err := fetchOIViaSidecar(); err == nil && result.Error == "" {
+			oiCache.Set("oi", result, oiCacheTTL)
+			continue
+		}
+		time.Sleep(15 * time.Second)
+	}
+}
+
 // Cookie state
 var (
 	nseCookies    []*http.Cookie
