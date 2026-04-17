@@ -39,17 +39,20 @@ const CockpitView = () => {
     const [signals,       setSignals]       = useState(null);
     const [direction,     setDirection]     = useState(null);
     const [institutional, setInstitutional] = useState(null);
+    const [scalper,       setScalper]       = useState(null);
     const [lastUpdate,    setLastUpdate]    = useState(null);
 
     const fetchAll = useCallback(async () => {
-        const [s, d, i] = await Promise.all([
+        const [s, d, i, sc] = await Promise.all([
             fetch('/api/trade-signals').then(r => r.json()).catch(() => null),
             fetch('/api/market-direction').then(r => r.json()).catch(() => null),
             fetch('/api/institutional-outlook').then(r => r.json()).catch(() => null),
+            fetch('/api/scalper-signal').then(r => r.json()).catch(() => null),
         ]);
         setSignals(s);
         setDirection(d);
         setInstitutional(i);
+        setScalper(sc?.error ? null : sc);
         setLastUpdate(new Date());
     }, []);
 
@@ -69,7 +72,7 @@ const CockpitView = () => {
             )}
 
             <div className="cockpit-grid">
-                <LeftColumn  data={signals} />
+                <LeftColumn  data={signals} scalper={scalper} />
                 <CenterColumn data={direction} />
                 <RightColumn data={institutional} />
             </div>
@@ -80,7 +83,7 @@ const CockpitView = () => {
 /* ═══════════════════════════════════════════ */
 /*  LEFT — Trade Signal                         */
 /* ═══════════════════════════════════════════ */
-const LeftColumn = ({ data }) => {
+const LeftColumn = ({ data, scalper }) => {
     if (!data) return (
         <div className="cpanel">
             <div className="cpanel-header">Trade Signal</div>
@@ -156,6 +159,32 @@ const LeftColumn = ({ data }) => {
                     </div>
                 </div>
             </div>
+
+            {/* 3-Min Scalper card */}
+            {scalper && (
+                <div className="cpanel" style={{ borderTop: `3px solid ${sigColor(scalper.signal)}` }}>
+                    <div className="cpanel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>3-Min Scalper LSTM</span>
+                        <span style={{ fontSize: '0.58rem', color: 'var(--text-muted)', fontWeight: 400 }}>Next {scalper.horizon_minutes || 3} min</span>
+                    </div>
+                    <div className="cpanel-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{ fontSize: '1.5rem', fontWeight: 800, color: sigColor(scalper.signal), fontFamily: 'var(--font-display)', lineHeight: 1 }}>
+                                {scalper.signal || 'NO TRADE'}
+                            </div>
+                            <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                {scalper.prediction} · {scalper.confidence?.toFixed(1)}% confidence
+                            </div>
+                        </div>
+                        <MiniBarRow label="UP"   pct={scalper.probs?.up}       color="#10b981" />
+                        <MiniBarRow label="SIDE" pct={scalper.probs?.sideways} color="#94a3b8" />
+                        <MiniBarRow label="DOWN" pct={scalper.probs?.down}     color="#ef4444" />
+                        <div style={{ fontSize: '0.58rem', color: 'var(--text-muted)', textAlign: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '0.3rem' }}>
+                            Model acc: {scalper.model_accuracy?.toFixed(1)}% · UP recall: 72%
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* OI Analysis card */}
             <div className="cpanel">

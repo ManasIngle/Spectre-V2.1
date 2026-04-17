@@ -56,8 +56,23 @@ const OITrendingView = () => {
 
     if (error && !oiData) {
         return (
-            <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--status-sell)' }}>
-                {error}. NSE may be blocking requests outside market hours or from this IP. Data will appear during market hours (9:15 AM - 3:30 PM IST).
+            <div style={{ textAlign: 'center', padding: '3rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ fontSize: '1.5rem' }}>⏳</div>
+                <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>NSE OI data unavailable</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', maxWidth: 420 }}>
+                    {error}. NSE rate-limits external IPs — retrying automatically every 3 minutes.
+                </div>
+                <button
+                    onClick={fetchOI}
+                    style={{
+                        marginTop: '0.5rem', padding: '0.5rem 1.5rem',
+                        borderRadius: '8px', border: '1px solid var(--border-color)',
+                        background: 'rgba(255,255,255,0.05)', color: 'var(--text-primary)',
+                        cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600,
+                    }}
+                >
+                    Retry now
+                </button>
             </div>
         );
     }

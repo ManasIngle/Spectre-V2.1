@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 const TradeSignalsView = () => {
     const [data, setData] = useState(null);
     const [morning, setMorning] = useState(null);
+    const [scalper, setScalper] = useState(null);
     const [loading, setLoading] = useState(true);
 
     const fetchSignals = useCallback(async () => {
@@ -26,13 +27,25 @@ const TradeSignalsView = () => {
         }
     }, []);
 
+    const fetchScalper = useCallback(async () => {
+        try {
+            const res = await fetch('/api/scalper-signal');
+            const json = await res.json();
+            setScalper(json);
+        } catch (_) {
+            setScalper(null);
+        }
+    }, []);
+
     useEffect(() => {
         fetchSignals();
         fetchMorning();
-        const id = setInterval(fetchSignals, 30000);
+        fetchScalper();
+        const id  = setInterval(fetchSignals, 30000);
         const mId = setInterval(fetchMorning, 60000);
-        return () => { clearInterval(id); clearInterval(mId); };
-    }, [fetchSignals, fetchMorning]);
+        const sId = setInterval(fetchScalper, 60000); // scalper refreshes every minute
+        return () => { clearInterval(id); clearInterval(mId); clearInterval(sId); };
+    }, [fetchSignals, fetchMorning, fetchScalper]);
 
     if (loading && !data) {
         return <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>Running ML model inference...</div>;
@@ -136,6 +149,11 @@ const TradeSignalsView = () => {
                     <ConfirmBadge label="Advance %" confirmed={data.equity_advance_pct > 50} detail={`${data.equity_advance_pct}%`} />
                 </div>
             </div>
+
+            {/* ═══ 3-MINUTE SCALPER LSTM ═══ */}
+            {scalper && !scalper.error && (
+                <ScalperCard scalper={scalper} />
+            )}
 
             {/* ═══ BOTTOM ROW ═══ */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -325,5 +343,72 @@ const ProbBar = ({ label, pct, color }) => (
     </div>
 );
 
+
+const ScalperCard = ({ scalper }) => {
+    const sig = scalper.signal || 'NO TRADE';
+    const pred = scalper.prediction || 'SIDEWAYS';
+    const conf = scalper.confidence || 0;
+    const color = sig === 'BUY CE' ? '#10b981' : sig === 'BUY PE' ? '#ef4444' : '#64748b';
+    const probs = scalper.probs || {};
+
+    return (
+        <div className="glass" style={{
+            borderRadius: 'var(--radius-lg)', overflow: 'hidden',
+            borderLeft: `5px solid ${color}`,
+        }}>
+            <div style={{ padding: '1rem 1.5rem', display: 'flex', alignItems: 'center', gap: '2rem', flexWrap: 'wrap' }}>
+                {/* Label */}
+                <div style={{ minWidth: 180 }}>
+                    <div style={{
+                        fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.07em',
+                        textTransform: 'uppercase', color: '#a78bfa',
+                        background: 'rgba(167,139,250,0.12)', border: '1px solid rgba(167,139,250,0.25)',
+                        borderRadius: '4px', padding: '0.15rem 0.5rem', display: 'inline-block', marginBottom: '0.4rem',
+                    }}>
+                        3-Min Scalper LSTM · Next {scalper.horizon_minutes || 3} min
+                    </div>
+                    <div style={{ fontSize: '1.8rem', fontWeight: 800, color, fontFamily: 'var(--font-display)', lineHeight: 1 }}>
+                        {sig}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                        Prediction: {pred} · Model Acc: {scalper.model_accuracy?.toFixed(1) || '—'}%
+                    </div>
+                </div>
+
+                {/* Confidence ring */}
+                <div style={{ textAlign: 'center' }}>
+                    <ConfidenceRing value={conf} color={color} />
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>Confidence</div>
+                </div>
+
+                {/* Prob bars */}
+                <div style={{ flex: 1, minWidth: 200 }}>
+                    {[
+                        { label: 'UP  (BUY CE)', val: probs.up,       color: '#10b981' },
+                        { label: 'SIDEWAYS',      val: probs.sideways, color: '#94a3b8' },
+                        { label: 'DOWN (BUY PE)', val: probs.down,     color: '#ef4444' },
+                    ].map(({ label, val, color: c }) => (
+                        <div key={label} style={{ marginBottom: '0.5rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '0.2rem' }}>
+                                <span>{label}</span>
+                                <span style={{ fontWeight: 700, color: c }}>{val != null ? `${val.toFixed(1)}%` : '—'}</span>
+                            </div>
+                            <div style={{ height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${val || 0}%`, background: c, borderRadius: '3px', transition: 'width 0.5s ease' }} />
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Meta */}
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <span>Bars used: {scalper.bars_available || '—'}</span>
+                    <span>Lookback: {scalper.seq_len_used || 30} min</span>
+                    <span>UP recall: 72% · trained 2015-2022</span>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 export default TradeSignalsView;
