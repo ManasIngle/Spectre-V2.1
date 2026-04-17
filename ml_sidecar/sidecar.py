@@ -159,29 +159,27 @@ _API_HEADERS = {
 
 async def _refresh_nse_cookies():
     global _NSE_COOKIES, _NSE_COOKIE_TIME
-    # Use unsafe=True so aiohttp accepts cookies from IP-based URLs too
-    jar = aiohttp.CookieJar(unsafe=True)
+    jar = aiohttp.CookieJar()
     connector = aiohttp.TCPConnector(ssl=False)
-    timeout = aiohttp.ClientTimeout(total=20)
+    timeout = aiohttp.ClientTimeout(total=15)
     try:
-        async with aiohttp.ClientSession(cookie_jar=jar, connector=connector, timeout=timeout) as s:
-            async with s.get("https://www.nseindia.com", headers=_BROWSER_HEADERS) as r:
-                await r.read()  # consume body so connection is released
-            await asyncio.sleep(0.6 + random.random() * 0.6)
-            oc_hdrs = {**_BROWSER_HEADERS, "Referer": "https://www.nseindia.com/"}
-            async with s.get("https://www.nseindia.com/option-chain", headers=oc_hdrs) as r:
+        async with aiohttp.ClientSession(cookie_jar=jar, connector=connector, timeout=timeout) as session:
+            async with session.get("https://www.nseindia.com", headers=_BROWSER_HEADERS) as r:
                 await r.read()
-
-        # Extract cookies from the jar — filter_cookies returns a SimpleCookie for the URL
-        from http.cookies import SimpleCookie
-        import yarl
-        nse_url = yarl.URL("https://www.nseindia.com")
-        filtered = jar.filter_cookies(nse_url)
-        cookies = {k: v.value for k, v in filtered.items()}
+                print(f"NSE home: HTTP {r.status}")
+            await asyncio.sleep(0.5 + random.random() * 0.5)
+            oc_hdrs = {**_BROWSER_HEADERS, "Referer": "https://www.nseindia.com/"}
+            async with session.get("https://www.nseindia.com/option-chain", headers=oc_hdrs) as r:
+                await r.read()
+                print(f"NSE OC page: HTTP {r.status}")
+        # Direct jar iteration — works across all aiohttp versions
+        cookies = {}
+        for cookie in jar:
+            cookies[cookie.key] = cookie.value
         if cookies:
             _NSE_COOKIES = cookies
             _NSE_COOKIE_TIME = time.time()
-            print(f"NSE cookies refreshed: {list(cookies.keys())}")
+            print(f"NSE cookies refreshed: {len(cookies)} cookies ({', '.join(cookies.keys())})")
         else:
             print("NSE cookie refresh: no cookies received")
     except Exception as e:
@@ -197,21 +195,25 @@ async def _fetch_oi() -> dict:
 
     for attempt in range(3):
         try:
-            cookie_str = "; ".join(f"{k}={v}" for k, v in _NSE_COOKIES.items())
-            hdrs = {**_API_HEADERS, "Cookie": cookie_str}
+            cookie_str = "; ".join(f"{k}={v}" for k, v in (_NSE_COOKIES or {}).items())
+            hdrs = {**_API_HEADERS}
+            if cookie_str:
+                hdrs["Cookie"] = cookie_str
             connector = aiohttp.TCPConnector(ssl=False)
-            timeout = aiohttp.ClientTimeout(total=20)
+            timeout = aiohttp.ClientTimeout(total=15)
 
-            # Step 1: get nearest expiry — separate session to avoid shared-connection issues
-            nearest = None
-            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as s:
-                async with s.get("https://www.nseindia.com/api/option-chain-contract-info?symbol=NIFTY", headers=hdrs) as r:
-                    if r.status != 200:
-                        print(f"OI contract-info HTTP {r.status} on attempt {attempt+1}")
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                # Step 1: get nearest expiry
+                contract_url = "https://www.nseindia.com/api/option-chain-contract-info?symbol=NIFTY"
+                async with session.get(contract_url, headers=hdrs) as r:
+                    print(f"NSE Contract API attempt {attempt+1}: HTTP {r.status}")
+                    if r.status in (401, 403):
                         _NSE_COOKIES = {}
                         await _refresh_nse_cookies()
-                        cookie_str = "; ".join(f"{k}={v}" for k, v in _NSE_COOKIES.items())
-                        hdrs = {**_API_HEADERS, "Cookie": cookie_str}
+                        await asyncio.sleep(1 + attempt)
+                        continue
+                    if r.status != 200:
+                        print(f"OI contract-info HTTP {r.status} on attempt {attempt+1}")
                         await asyncio.sleep(1 + attempt)
                         continue
                     ci = await r.json(content_type=None)
@@ -221,24 +223,25 @@ async def _fetch_oi() -> dict:
                         continue
                     nearest = expiry_dates[0]
 
-            if not nearest:
-                continue
+                await asyncio.sleep(0.3 + random.random() * 0.4)
 
-            await asyncio.sleep(0.3 + random.random() * 0.4)
-
-            # Step 2: fetch option chain v3 — fresh session
-            v3_url = f"https://www.nseindia.com/api/option-chain-v3?type=Indices&symbol=NIFTY&expiry={nearest}"
-            connector2 = aiohttp.TCPConnector(ssl=False)
-            async with aiohttp.ClientSession(connector=connector2, timeout=timeout) as s2:
-                async with s2.get(v3_url, headers=hdrs) as r:
+                # Step 2: fetch option chain v3 — same session (cookies stay active)
+                v3_url = f"https://www.nseindia.com/api/option-chain-v3?type=Indices&symbol=NIFTY&expiry={nearest}"
+                async with session.get(v3_url, headers=hdrs) as r:
+                    print(f"NSE OI API (v3) attempt {attempt+1}: HTTP {r.status}")
                     if r.status in (401, 403):
                         print(f"OI v3 chain HTTP {r.status} — refreshing cookies")
                         _NSE_COOKIES = {}
                         await _refresh_nse_cookies()
                         await asyncio.sleep(1 + attempt)
                         continue
+                    if r.status == 429:
+                        print("NSE rate limited, waiting...")
+                        await asyncio.sleep(3 + attempt * 2)
+                        continue
                     if r.status != 200:
                         print(f"OI v3 chain HTTP {r.status} on attempt {attempt+1}")
+                        await asyncio.sleep(1 + attempt)
                         continue
                     raw = await r.json(content_type=None)
 
