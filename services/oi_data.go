@@ -189,7 +189,7 @@ func FetchOIChain() (*models.OIChainData, error) {
 	}
 
 	// Try sidecar first — Python aiohttp passes Akamai TLS check; Go net/http does not
-	if result, err := fetchOIViaSidecar(); err == nil {
+	if result, err := fetchOIViaSidecar(); err == nil && result.Error == "" {
 		oiCache.Set("oi", result, oiCacheTTL)
 		return result, nil
 	}
