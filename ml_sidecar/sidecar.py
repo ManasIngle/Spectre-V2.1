@@ -291,36 +291,64 @@ _YAHOO_HEADERS = {
     "Origin": "https://finance.yahoo.com",
 }
 
-@app.get("/ohlcv")
-async def get_ohlcv(ticker: str, interval: str = "3m", range: str = "5d"):
-    """Proxy Yahoo Finance OHLCV — Python aiohttp bypasses VPS TLS block."""
-    url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval={interval}&range={range}"
-    try:
-        timeout = aiohttp.ClientTimeout(total=12)
-        async with aiohttp.ClientSession(timeout=timeout) as s:
-            async with s.get(url, headers=_YAHOO_HEADERS) as r:
-                if r.status != 200:
-                    return {"error": f"Yahoo returned {r.status}", "bars": []}
-                data = await r.json(content_type=None)
-        result = data.get("chart", {}).get("result", [])
-        if not result:
-            return {"error": "no data", "bars": []}
-        res = result[0]
-        timestamps = res.get("timestamp", [])
-        q = res.get("indicators", {}).get("quote", [{}])[0]
-        closes = q.get("close", [])
-        bars = []
-        for i, ts in enumerate(timestamps):
-            if i >= len(closes) or not closes[i]:
-                continue
-            bars.append({
-                "t": ts,
-                "o": q.get("open", [None]*len(timestamps))[i] or 0,
-                "h": q.get("high", [None]*len(timestamps))[i] or 0,
-                "l": q.get("low",  [None]*len(timestamps))[i] or 0,
-                "c": closes[i],
-                "v": q.get("volume", [0]*len(timestamps))[i] or 0,
+def _resample_to_n_min(bars_1m: list, n: int) -> list:
+    """Group 1m bars into n-minute candles (OHLCV). Partial last group is dropped."""
+    result = []
+    group = []
+    for bar in bars_1m:
+        group.append(bar)
+        if len(group) == n:
+            result.append({
+                "t": group[0]["t"],
+                "o": group[0]["o"],
+                "h": max(b["h"] for b in group),
+                "l": min(b["l"] for b in group),
+                "c": group[-1]["c"],
+                "v": sum(b["v"] for b in group),
             })
+            group = []
+    return result
+
+async def _fetch_yahoo_bars(ticker: str, interval: str, range_: str) -> list:
+    """Fetch OHLCV bars from Yahoo Finance. Returns list of bar dicts."""
+    url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval={interval}&range={range_}"
+    timeout = aiohttp.ClientTimeout(total=12)
+    async with aiohttp.ClientSession(timeout=timeout) as s:
+        async with s.get(url, headers=_YAHOO_HEADERS) as r:
+            if r.status != 200:
+                raise ValueError(f"Yahoo returned {r.status}")
+            data = await r.json(content_type=None)
+    result = data.get("chart", {}).get("result", [])
+    if not result:
+        raise ValueError("no data")
+    res = result[0]
+    timestamps = res.get("timestamp", [])
+    q = res.get("indicators", {}).get("quote", [{}])[0]
+    closes = q.get("close", [])
+    bars = []
+    for i, ts in enumerate(timestamps):
+        if i >= len(closes) or not closes[i]:
+            continue
+        bars.append({
+            "t": ts,
+            "o": q.get("open", [None] * len(timestamps))[i] or 0,
+            "h": q.get("high", [None] * len(timestamps))[i] or 0,
+            "l": q.get("low",  [None] * len(timestamps))[i] or 0,
+            "c": closes[i],
+            "v": q.get("volume", [0] * len(timestamps))[i] or 0,
+        })
+    return bars
+
+@app.get("/ohlcv")
+async def get_ohlcv(ticker: str, interval: str = "5m", range: str = "5d"):
+    """Proxy Yahoo Finance OHLCV — Python aiohttp bypasses VPS TLS block.
+    Yahoo doesn't support 3m; we fetch 1m and resample."""
+    try:
+        if interval == "3m":
+            bars_1m = await _fetch_yahoo_bars(ticker, "1m", range)
+            bars = _resample_to_n_min(bars_1m, 3)
+        else:
+            bars = await _fetch_yahoo_bars(ticker, interval, range)
         return {"bars": bars}
     except Exception as e:
         return {"error": str(e), "bars": []}

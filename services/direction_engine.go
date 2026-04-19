@@ -35,7 +35,7 @@ func ComputeDirection() (*models.DirectionResult, error) {
 	// LTP from fastest available TF
 	for _, tf := range tfOrder {
 		if d, ok := allSignals[tf]; ok && d.LTP > 0 {
-			result.NiftyLTP = d.LTP
+			result.NiftyLTP = math.Round(d.LTP*100) / 100
 			break
 		}
 	}
@@ -122,11 +122,14 @@ func computeTFDetail(bars []models.OHLCV) models.TFDetail {
 	chng := 0.0
 	if last > 0 { chng = c[last] - c[last-1] }
 
+	r2 := func(x float64) float64 { return math.Round(x*100) / 100 }
+	r4 := func(x float64) float64 { return math.Round(x*10000) / 10000 }
+
 	return models.TFDetail{
-		RawScore: raw, Normalized: float64(raw) / float64(len(scoreKeys)) * 10,
-		LTP: c[last], Change: chng, RSI: rsi,
-		MACDHist: hist[last], Momentum: mom,
-		VWAP: vwapVal, EMA9: e9[last], EMA21: e21[last],
+		RawScore: raw, Normalized: r2(float64(raw) / float64(len(scoreKeys)) * 10),
+		LTP: r2(c[last]), Change: r2(chng), RSI: r2(rsi),
+		MACDHist: r4(hist[last]), Momentum: r4(mom),
+		VWAP: r2(vwapVal), EMA9: r2(e9[last]), EMA21: r2(e21[last]),
 		Signals: sigs,
 	}
 }
@@ -189,7 +192,7 @@ func aggregateDirection(tfs map[string]models.TFDetail, oi *models.OIChainData) 
 	return &models.DirectionResult{
 		Score: math.Round(combined*10) / 10,
 		Direction: dir, SuggestedAction: action,
-		Confidence: math.Min(math.Abs(combined), 100),
+		Confidence: math.Round(math.Min(math.Abs(combined), 100)*10) / 10,
 		IndicatorScore: math.Round(score*10) / 10,
 		OIBias: oiBias, Timeframes: tfs, OIAnalysis: oiAn,
 	}
