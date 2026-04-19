@@ -21,9 +21,13 @@ var oiCache = NewTTLCache()
 
 const oiCacheTTL = 150 * time.Second // 2.5 min — NSE updates every 3 min
 
-// sidecarOIURL is where the Python sidecar serves OI data.
+// sidecarOIURLs — tried in order. "ml-sidecar" is the docker-compose service name
+// (works in prod containers); "localhost" is the fallback for local dev.
 // Python aiohttp bypasses Akamai TLS fingerprinting that blocks Go's net/http.
-const sidecarOIURL = "http://localhost:8240/oi"
+var sidecarOIURLs = []string{
+	"http://ml-sidecar:8240/oi",
+	"http://localhost:8240/oi",
+}
 
 func init() {
 	go oiRetryLoop()
@@ -226,7 +230,14 @@ func FetchOIChain() (*models.OIChainData, error) {
 
 func fetchOIViaSidecar() (*models.OIChainData, error) {
 	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Get(sidecarOIURL)
+	var resp *http.Response
+	var err error
+	for _, url := range sidecarOIURLs {
+		resp, err = client.Get(url)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

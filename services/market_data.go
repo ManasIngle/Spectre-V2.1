@@ -13,8 +13,13 @@ import (
 var marketCache = NewTTLCache()
 var yahooClient = &http.Client{Timeout: 12 * time.Second}
 
-// sidecarOHLCVURL — Python sidecar proxies Yahoo Finance to avoid TLS fingerprint block
-const sidecarOHLCVURL = "http://localhost:8240/ohlcv"
+// sidecarOHLCVBases — tried in order. "ml-sidecar" is the docker-compose service name;
+// "localhost" is the fallback for local dev. Python sidecar proxies Yahoo Finance
+// to avoid TLS fingerprint blocks.
+var sidecarOHLCVBases = []string{
+	"http://ml-sidecar:8240/ohlcv",
+	"http://localhost:8240/ohlcv",
+}
 
 func readBody(resp *http.Response, maxBytes int64) ([]byte, error) {
 	defer resp.Body.Close()
@@ -43,8 +48,15 @@ func FetchOHLCV(ticker, interval, rangeVal string, ttl time.Duration) ([]models.
 }
 
 func fetchOHLCVViaSidecar(ticker, interval, rangeVal string) ([]models.OHLCV, error) {
-	url := fmt.Sprintf("%s?ticker=%s&interval=%s&range=%s", sidecarOHLCVURL, ticker, interval, rangeVal)
-	resp, err := yahooClient.Get(url)
+	var resp *http.Response
+	var err error
+	for _, base := range sidecarOHLCVBases {
+		url := fmt.Sprintf("%s?ticker=%s&interval=%s&range=%s", base, ticker, interval, rangeVal)
+		resp, err = yahooClient.Get(url)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
