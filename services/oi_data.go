@@ -20,6 +20,12 @@ import (
 var oiCache = NewTTLCache()
 
 const oiCacheTTL = 150 * time.Second // 2.5 min — NSE updates every 3 min
+const oiTrendCap = 200               // ~8h at 150s cadence — enough for one full session
+
+var (
+	oiTrend   []models.OISnapshot
+	oiTrendMu sync.Mutex
+)
 
 // sidecarOIURLs — tried in order. "ml-sidecar" is the docker-compose service name
 // (works in prod containers); "localhost" is the fallback for local dev.
@@ -45,10 +51,55 @@ func oiRetryLoop() {
 		// No data yet — try aggressively
 		if result, err := fetchOIViaSidecar(); err == nil && result.Error == "" {
 			oiCache.Set("oi", result, oiCacheTTL)
+			recordOISnapshot(result)
 			continue
 		}
 		time.Sleep(15 * time.Second)
 	}
+}
+
+// recordOISnapshot appends one row to the intraday OI trend buffer.
+// Dedupes against the last entry so a cache-miss + immediate refetch doesn't double-log.
+func recordOISnapshot(d *models.OIChainData) {
+	if d == nil || d.Error != "" {
+		return
+	}
+	oiTrendMu.Lock()
+	defer oiTrendMu.Unlock()
+
+	if n := len(oiTrend); n > 0 {
+		last := oiTrend[n-1]
+		if last.TotalCEOIChg == d.TotalCEOIChg && last.TotalPEOIChg == d.TotalPEOIChg && last.Underlying == d.Underlying {
+			return
+		}
+	}
+
+	ist, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		ist = time.FixedZone("IST", 5*3600+1800)
+	}
+	now := time.Now().In(ist)
+	snap := models.OISnapshot{
+		Timestamp:    now.Format("2006-01-02 15:04:05"),
+		Time:         now.Unix(),
+		Underlying:   d.Underlying,
+		TotalCEOIChg: d.TotalCEOIChg,
+		TotalPEOIChg: d.TotalPEOIChg,
+		PCR:          d.PCR,
+	}
+	oiTrend = append(oiTrend, snap)
+	if len(oiTrend) > oiTrendCap {
+		oiTrend = oiTrend[len(oiTrend)-oiTrendCap:]
+	}
+}
+
+// GetOITrend returns a copy of the current intraday OI trend buffer.
+func GetOITrend() []models.OISnapshot {
+	oiTrendMu.Lock()
+	defer oiTrendMu.Unlock()
+	out := make([]models.OISnapshot, len(oiTrend))
+	copy(out, oiTrend)
+	return out
 }
 
 // Cookie state
@@ -195,6 +246,7 @@ func FetchOIChain() (*models.OIChainData, error) {
 	// Try sidecar first — Python aiohttp passes Akamai TLS check; Go net/http does not
 	if result, err := fetchOIViaSidecar(); err == nil && result.Error == "" {
 		oiCache.Set("oi", result, oiCacheTTL)
+		recordOISnapshot(result)
 		return result, nil
 	}
 
@@ -208,6 +260,7 @@ func FetchOIChain() (*models.OIChainData, error) {
 		result, err := fetchOIAttempt()
 		if err == nil {
 			oiCache.Set("oi", result, oiCacheTTL)
+			recordOISnapshot(result)
 			return result, nil
 		}
 		lastErr = err
@@ -286,7 +339,8 @@ func fetchOIViaSidecar() (*models.OIChainData, error) {
 		return nil, err
 	}
 	result := &models.OIChainData{
-		PCR: raw.PCR, TotalCEOI: raw.TotalCEOI, TotalPEOI: raw.TotalPEOI,
+		PCR: raw.PCR, Underlying: raw.Underlying,
+		TotalCEOI: raw.TotalCEOI, TotalPEOI: raw.TotalPEOI,
 		TotalCEOIChg: raw.TotalCEOIChg, TotalPEOIChg: raw.TotalPEOIChg,
 	}
 	for _, s := range raw.Strikes {
@@ -449,6 +503,7 @@ func fetchOIAttempt() (*models.OIChainData, error) {
 	if result.TotalCEOI > 0 {
 		result.PCR = float64(result.TotalPEOI) / float64(result.TotalCEOI)
 	}
+	result.Underlying = underlying
 
 	return result, nil
 }

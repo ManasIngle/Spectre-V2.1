@@ -28,6 +28,7 @@ func NewRouter() *gin.Engine {
 		api.GET("/dashboard", handlers.GetDashboard)
 		api.GET("/market-direction", handlers.GetMarketDirection)
 		api.GET("/oi-chain", handlers.GetOIChain)
+		api.GET("/oi-trend", handlers.GetOITrend)
 		api.GET("/trade-signals", handlers.GetTradeSignals)
 		api.GET("/morning-signal", handlers.GetMorningSignal)
 		api.POST("/morning-signal/refresh", handlers.RefreshMorningSignalHandler)
@@ -37,6 +38,8 @@ func NewRouter() *gin.Engine {
 		api.GET("/ml-logs", handlers.GetMLLogs)
 		api.GET("/ml-logs/download", handlers.DownloadMLLogs)
 		api.GET("/scalper-signal", handlers.GetScalperSignal)
+		api.GET("/news", handlers.GetNews)
+		api.GET("/heatmap", handlers.GetHeatmap)
 	}
 
 	return r

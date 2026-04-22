@@ -10,6 +10,8 @@ import (
 	"spectre/models"
 )
 
+const signalCSVFile = "system_signals.csv"
+
 func StartSystemCron() {
 	go func() {
 		ticker := time.NewTicker(1 * time.Minute)
@@ -19,6 +21,10 @@ func StartSystemCron() {
 		if err != nil {
 			log.Println("Timezone error, using local for cron:", err)
 			loc = time.Local
+		}
+
+		if err := migrateSignalCSV(); err != nil {
+			log.Printf("CSV migration skipped: %v", err)
 		}
 
 		log.Println("System Caching Cron initialized (09:00 - 15:30 IST)")
@@ -50,9 +56,80 @@ func StartSystemCron() {
 	}()
 }
 
+// migrateSignalCSV splices Scalper_* columns into an existing CSV that predates them.
+// Inserted directly before "PCR" to match the new header order; old rows get "" padding.
+func migrateSignalCSV() error {
+	f, err := os.Open(signalCSVFile)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	rows, err := csv.NewReader(f).ReadAll()
+	f.Close()
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+
+	header := rows[0]
+	pcrIdx := -1
+	for i, col := range header {
+		if col == "Scalper_Signal" {
+			return nil
+		}
+		if col == "PCR" {
+			pcrIdx = i
+		}
+	}
+	if pcrIdx < 0 {
+		return fmt.Errorf("PCR column not found in header; refusing to migrate")
+	}
+
+	scalperCols := []string{"Scalper_Signal", "Scalper_Down", "Scalper_Side", "Scalper_Up"}
+	pad := []string{"", "0.0", "0.0", "0.0"}
+
+	splice := func(row, insert []string) []string {
+		out := make([]string, 0, len(row)+len(insert))
+		out = append(out, row[:pcrIdx]...)
+		out = append(out, insert...)
+		out = append(out, row[pcrIdx:]...)
+		return out
+	}
+
+	rows[0] = splice(header, scalperCols)
+	for i := 1; i < len(rows); i++ {
+		if len(rows[i]) < pcrIdx {
+			continue
+		}
+		rows[i] = splice(rows[i], pad)
+	}
+
+	tmp := signalCSVFile + ".migrate.tmp"
+	out, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	w := csv.NewWriter(out)
+	if err := w.WriteAll(rows); err != nil {
+		out.Close()
+		os.Remove(tmp)
+		return err
+	}
+	w.Flush()
+	if err := out.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, signalCSVFile); err != nil {
+		return err
+	}
+	log.Printf("Migrated %s: inserted Scalper_* columns for %d existing rows", signalCSVFile, len(rows)-1)
+	return nil
+}
+
 func logSignalToCSV(t time.Time, s *models.TradeSignal) {
-	filename := "system_signals.csv"
-	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(signalCSVFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Printf("Failed to open csv: %v", err)
 		return
@@ -77,6 +154,8 @@ func logSignalToCSV(t time.Time, s *models.TradeSignal) {
 			"CrossAsset_Signal", "CrossAsset_Down", "CrossAsset_Side", "CrossAsset_Up",
 			// Model 4: Old Direction (1H Trend)
 			"OldDir_Signal", "OldDir_Down", "OldDir_Side", "OldDir_Up",
+			// Model 5: Scalper LSTM (3m horizon)
+			"Scalper_Signal", "Scalper_Down", "Scalper_Side", "Scalper_Up",
 			// Market context
 			"PCR", "Equity_Ret",
 		})
@@ -119,6 +198,15 @@ func logSignalToCSV(t time.Time, s *models.TradeSignal) {
 		oldDirUp = fmt.Sprintf("%.1f", s.Models.OldDirection.Probs[2])
 	}
 
+	// Model 5: Scalper LSTM (3m) — optional
+	scalpSig, scalpDown, scalpSide, scalpUp := "", "0.0", "0.0", "0.0"
+	if s.Models.Scalper != nil {
+		scalpSig = s.Models.Scalper.Signal
+		scalpDown = fmt.Sprintf("%.1f", s.Models.Scalper.Probs[0])
+		scalpSide = fmt.Sprintf("%.1f", s.Models.Scalper.Probs[1])
+		scalpUp = fmt.Sprintf("%.1f", s.Models.Scalper.Probs[2])
+	}
+
 	record := []string{
 		t.Format("2006-01-02"),
 		t.Format("15:04:05"),
@@ -139,6 +227,7 @@ func logSignalToCSV(t time.Time, s *models.TradeSignal) {
 		dirSig, dirDown, dirSide, dirUp,
 		crossSig, crossDown, crossSide, crossUp,
 		oldDirSig, oldDirDown, oldDirSide, oldDirUp,
+		scalpSig, scalpDown, scalpSide, scalpUp,
 		pcr,
 		fmt.Sprintf("%.3f", s.EquityReturn),
 	}

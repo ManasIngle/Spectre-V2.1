@@ -353,19 +353,130 @@ async def get_ohlcv(ticker: str, interval: str = "5m", range: str = "5d"):
     except Exception as e:
         return {"error": str(e), "bars": []}
 
+# ─── NSE heatmap (full equity universe) ───────────────────────────────────────
+_HEATMAP_CACHE = {"expiry": 0, "data": None}
+_HEATMAP_TTL = 180  # 3 min — matches the Python v1.2 behaviour
+
+_NSE_TICKERS_CACHE = {"expiry": 0, "data": []}
+_NSE_TICKERS_TTL = 86400  # 24h
+
+_NSE_FALLBACK_SYMBOLS = [
+    "RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","HINDUNILVR","ITC","SBIN",
+    "BHARTIARTL","KOTAKBANK","LT","AXISBANK","BAJFINANCE","ASIANPAINT","MARUTI",
+    "SUNPHARMA","TATAMOTORS","WIPRO","HCLTECH","ADANIENT","ADANIPORTS","POWERGRID",
+    "NTPC","ULTRACEMCO","TITAN","NESTLEIND","TECHM","BAJAJFINSV","INDUSINDBK",
+    "TATASTEEL","JSWSTEEL","ONGC","COALINDIA","GRASIM","CIPLA","DRREDDY","BPCL",
+    "DIVISLAB","APOLLOHOSP","EICHERMOT","HEROMOTOCO","HDFCLIFE","SBILIFE",
+    "BRITANNIA","TATACONSUM","TRENT","DMART","LTIM","PIDILITIND","DABUR",
+    "GODREJCP","HAVELLS","COLPAL","MARICO","MUTHOOTFIN","BANDHANBNK","FEDERALBNK",
+    "PNB","BANKBARODA","CANBK","CHOLAFIN","SBICARD","IRCTC","POLYCAB","AMBUJACEM",
+    "ACC","TATAPOWER","ADANIGREEN","IRFC","RECLTD","PFC","HINDALCO","VEDL","NMDC",
+    "JINDALSTEL","TATAELXSI","PERSISTENT","COFORGE","MPHASIS","DIXON","SIEMENS",
+    "ABB","BEL","HAL","MOTHERSON","BOSCHLTD","MRF","BALKRISIND","SRF","DLF",
+    "GODREJPROP","OBEROIRLTY","PHOENIXLTD","ICICIGI","ICICIPRULI","HDFCAMC",
+    "MCX","BSE","CDSL","NAUKRI","INDIAMART","ZOMATO","PAYTM","NYKAA","MAXHEALTH",
+    "FORTIS","IGL","MGL","GUJGASLTD","PETRONET","TATACOMM","INDIGO","PAGEIND",
+]
+
+async def _fetch_nse_ticker_list(session: aiohttp.ClientSession) -> list:
+    """Download NSE equity master CSV. Falls back to a hardcoded broad list."""
+    now = time.time()
+    if _NSE_TICKERS_CACHE["data"] and _NSE_TICKERS_CACHE["expiry"] > now:
+        return _NSE_TICKERS_CACHE["data"]
+    url = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/csv,*/*",
+    }
+    try:
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as r:
+            if r.status == 200:
+                text = await r.text()
+                symbols = []
+                for line in text.strip().split("\n")[1:]:
+                    parts = line.split(",")
+                    if parts and parts[0]:
+                        sym = parts[0].strip().strip('"')
+                        if sym and sym.replace("_", "").isalpha():
+                            symbols.append(sym)
+                if len(symbols) > 100:
+                    tickers = [f"{s}.NS" for s in symbols]
+                    _NSE_TICKERS_CACHE["data"] = tickers
+                    _NSE_TICKERS_CACHE["expiry"] = now + _NSE_TICKERS_TTL
+                    return tickers
+    except Exception as e:
+        print(f"NSE CSV fetch failed, using fallback: {e}")
+    fallback = [f"{s}.NS" for s in _NSE_FALLBACK_SYMBOLS]
+    _NSE_TICKERS_CACHE["data"] = fallback
+    _NSE_TICKERS_CACHE["expiry"] = now + 3600  # shorter fallback cache — keep retrying CSV
+    return fallback
+
+async def _fetch_quote_for_heatmap(session: aiohttp.ClientSession, ticker: str, sem: asyncio.Semaphore):
+    """Fetch last 2 daily closes for one ticker. Returns (ticker, ltp, chgPct) or None on failure."""
+    async with sem:
+        url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=5d"
+        try:
+            async with session.get(url, headers=_YAHOO_HEADERS, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                if r.status != 200:
+                    return None
+                data = await r.json(content_type=None)
+            chart = data.get("chart", {}).get("result", [])
+            if not chart:
+                return None
+            q = chart[0].get("indicators", {}).get("quote", [{}])[0]
+            closes = [c for c in q.get("close", []) if c]
+            if len(closes) < 2:
+                return None
+            ltp = closes[-1]
+            prev = closes[-2]
+            if prev <= 0:
+                return None
+            chg_pct = (ltp - prev) / prev * 100
+            return (ticker.replace(".NS", ""), round(float(ltp), 2), round(float(chg_pct), 2))
+        except Exception:
+            return None
+
+@app.get("/heatmap")
+async def get_heatmap():
+    """Fetch daily LTP + change% for the full NSE equity universe.
+    Cached for 3 min; ~2200 tickers fan-out through Yahoo with a 50-concurrency semaphore."""
+    now = time.time()
+    if _HEATMAP_CACHE["data"] and _HEATMAP_CACHE["expiry"] > now:
+        return _HEATMAP_CACHE["data"]
+
+    timeout = aiohttp.ClientTimeout(total=90)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        tickers = await _fetch_nse_ticker_list(session)
+        sem = asyncio.Semaphore(50)
+        tasks = [_fetch_quote_for_heatmap(session, t, sem) for t in tickers]
+        completed = await asyncio.gather(*tasks, return_exceptions=False)
+
+    rows = []
+    for r in completed:
+        if r is None:
+            continue
+        ticker, ltp, chg_pct = r
+        rows.append({"ticker": ticker, "ltp": ltp, "changePercent": chg_pct})
+    rows.sort(key=lambda x: abs(x["changePercent"]), reverse=True)
+
+    result = {"data": rows, "total": len(rows), "requested": len(tickers)}
+    _HEATMAP_CACHE["data"] = result
+    _HEATMAP_CACHE["expiry"] = now + _HEATMAP_TTL
+    return result
+
 async def _fetch_1m(ticker="%5ENSEI", days="1d"):
     url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1m&range={days}"
     timeout = aiohttp.ClientTimeout(total=10)
     async with aiohttp.ClientSession(timeout=timeout) as s:
-        async with s.get(url, headers={"User-Agent":"Mozilla/5.0"}) as r:
-            return await r.json()
+        async with s.get(url, headers=_YAHOO_HEADERS) as r:
+            return await r.json(content_type=None)
 
 async def _fetch_5m(ticker="%5ENSEI", days="5d"):
     url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=5m&range={days}"
     timeout = aiohttp.ClientTimeout(total=10)
     async with aiohttp.ClientSession(timeout=timeout) as s:
-        async with s.get(url, headers={"User-Agent":"Mozilla/5.0"}) as r:
-            return await r.json()
+        async with s.get(url, headers=_YAHOO_HEADERS) as r:
+            return await r.json(content_type=None)
 
 async def _fetch_vix() -> list:
     """Fetch India VIX 1m closes from Yahoo Finance. Returns list of recent VIX values."""

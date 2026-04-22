@@ -22,11 +22,22 @@ type OptionStrike struct {
 type OIChainData struct {
 	Strikes      []OptionStrike `json:"strikes"`
 	PCR          float64        `json:"pcr_oi"`
+	Underlying   float64        `json:"underlying,omitempty"`
 	TotalCEOI    int64          `json:"total_ce_oi"`
 	TotalPEOI    int64          `json:"total_pe_oi"`
 	TotalCEOIChg int64          `json:"total_ce_oi_chg"`
 	TotalPEOIChg int64          `json:"total_pe_oi_chg"`
 	Error        string         `json:"error,omitempty"`
+}
+
+// OISnapshot is one entry in the intraday OI trend history (one per successful NSE fetch).
+type OISnapshot struct {
+	Timestamp    string  `json:"timestamp"`
+	Time         int64   `json:"time"`
+	Underlying   float64 `json:"underlying"`
+	TotalCEOIChg int64   `json:"total_ce_oi_chg"`
+	TotalPEOIChg int64   `json:"total_pe_oi_chg"`
+	PCR          float64 `json:"pcr_oi"`
 }
 
 type TFDetail struct {
@@ -100,6 +111,7 @@ type ModelsBreakdown struct {
 	Direction    ModelOutput  `json:"direction"`
 	CrossAsset   ModelOutput  `json:"cross_asset"`
 	OldDirection *ModelOutput `json:"old_direction,omitempty"`
+	Scalper      *ModelOutput `json:"scalper,omitempty"`
 }
 
 type TradeSignal struct {

@@ -282,6 +282,25 @@ func buildModelsBreakdown(mlPred *MLPrediction) models.ModelsBreakdown {
 		bd.OldDirection = &old
 	}
 
+	// Scalper LSTM comes from a separate sidecar endpoint; pull it in here so the
+	// CSV log + API response carry all 5 models side-by-side.
+	if sc, err := FetchScalperPrediction(); err == nil && sc != nil {
+		predIdx := 1
+		switch sc.Prediction {
+		case "DOWN":
+			predIdx = 0
+		case "UP":
+			predIdx = 2
+		}
+		bd.Scalper = &models.ModelOutput{
+			Prediction: predIdx,
+			Signal:     sc.Signal,
+			Probs:      [3]float64{sc.Probs.Down, sc.Probs.Sideways, sc.Probs.Up},
+			Label:      sc.Prediction,
+			Accuracy:   sc.ModelAccuracy,
+		}
+	}
+
 	return bd
 }
 
