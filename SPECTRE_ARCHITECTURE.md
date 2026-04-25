@@ -33,6 +33,18 @@ The sidecar (`ml_sidecar/sidecar.py`) loads all four models on startup and serve
 * **Training:** `train_multitf.py` — LSTM on 60-bar sequences of normalized features
 * **Profile:** Pattern recognition on temporal sequences. Complements the tree-based XGBoost models.
 
+### E. Overnight Nifty Predictor (v3 stacked)
+* **Files:** `overnight_nifty/stacked_v3_*.pkl` + `overnight_nifty/regression_v3_xgb.pkl`
+* **Training:** `train_stacked_v3.py` (XGB + LightGBM → Logistic meta → isotonic calibration) and `train_regression_v3.py` (XGB regression for close price). Walk-forward CV across 2021-2025.
+* **Inputs:** 74 features built from 10 years of yfinance daily data — US (S&P/Nasdaq/VIX/US10Y/DXY), Asia (Nikkei/HSI/KOSPI), Europe (FTSE/DAX), commodities (Brent/Gold/Copper), FX (USD/INR), MOVE bond-vol index, lagged Nifty technicals, and 9 interaction/regime features (US-Asia agreement, VIX regime, vol divergence).
+* **Horizon:** Predicts the *next* NSE trading day's close. Generated daily at 03:30 IST after US session close + Asia open.
+* **Output:** `predicted_close` (₹), `direction` (UP/DOWN/FLAT), `direction_confidence` (calibrated 0-1), `magnitude_bucket` (TINY/SMALL/MEDIUM/LARGE).
+* **Edge:** 0.62% close-price MAE (5y walk-forward); directional accuracy is **75% at confidence ≥0.55** (~47 trades/year), **79% at confidence ≥0.60** (~37 trades/year).
+* **Endpoints:** `GET /predict_nifty_overnight`, `GET /predict_nifty_overnight/log?limit=N`
+* **Persistence:** Every prediction logged to `overnight_nifty/data/overnight_predictions.csv`. Actual closes auto-backfilled by the 16:00 IST cron.
+* **Independent of A-D.** Different inputs (daily yfinance, not live 1m), different consumer (advisory output for human decision, not auto-trade).
+* See [`ml_sidecar/MODELS.md`](ml_sidecar/MODELS.md) for full documentation and [`backtest/overnight_lstm_holdout/DECISION.md`](backtest/overnight_lstm_holdout/DECISION.md) for evaluation history.
+
 ### Feature Set (39 Total)
 
 **31 Base Technical Indicators:**

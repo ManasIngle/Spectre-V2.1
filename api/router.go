@@ -40,6 +40,8 @@ func NewRouter() *gin.Engine {
 		api.GET("/scalper-signal", handlers.GetScalperSignal)
 		api.GET("/news", handlers.GetNews)
 		api.GET("/heatmap", handlers.GetHeatmap)
+		api.GET("/overnight-prediction", handlers.GetOvernightPrediction)
+		api.GET("/overnight-log", handlers.GetOvernightLog)
 	}
 
 	return r

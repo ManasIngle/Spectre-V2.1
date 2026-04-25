@@ -1,0 +1,205 @@
+{
+  "model_name": "overnight_nifty_stacked_v3",
+  "version": "v3",
+  "trained_at": "2026-04-25T07:32:22.515883Z",
+  "n_features": 74,
+  "feature_columns": [
+    "nifty_ret_1",
+    "nifty_ret_5",
+    "nifty_ret_20",
+    "nifty_rsi_14",
+    "nifty_range_pct",
+    "nifty_vol_20",
+    "nifty_vs_ma20",
+    "nifty_vs_ma50",
+    "nifty_volz_20",
+    "sp500_ret_1",
+    "sp500_ret_5",
+    "sp500_ret_20",
+    "nasdaq_ret_1",
+    "nasdaq_ret_5",
+    "nasdaq_ret_20",
+    "vix_ret_1",
+    "vix_ret_5",
+    "vix_ret_20",
+    "us10y_ret_1",
+    "us10y_ret_5",
+    "us10y_ret_20",
+    "dxy_ret_1",
+    "dxy_ret_5",
+    "dxy_ret_20",
+    "usdinr_ret_1",
+    "usdinr_ret_5",
+    "usdinr_ret_20",
+    "brent_ret_1",
+    "brent_ret_5",
+    "brent_ret_20",
+    "gold_ret_1",
+    "gold_ret_5",
+    "gold_ret_20",
+    "copper_ret_1",
+    "copper_ret_5",
+    "copper_ret_20",
+    "nikkei_ret_1",
+    "nikkei_ret_5",
+    "nikkei_ret_20",
+    "hsi_ret_1",
+    "hsi_ret_5",
+    "hsi_ret_20",
+    "kospi_ret_1",
+    "kospi_ret_5",
+    "kospi_ret_20",
+    "move_ret_1",
+    "move_ret_5",
+    "move_ret_20",
+    "ftse_ret_1",
+    "ftse_ret_5",
+    "ftse_ret_20",
+    "dax_ret_1",
+    "dax_ret_5",
+    "dax_ret_20",
+    "vix_level",
+    "vix_vs_ma20",
+    "usdinr_level",
+    "us10y_level",
+    "dow",
+    "month",
+    "dow_0",
+    "dow_1",
+    "dow_2",
+    "dow_3",
+    "dow_4",
+    "us_asia_bull_agree",
+    "us_asia_bear_agree",
+    "asia_bull_count",
+    "vix_regime_low",
+    "vix_regime_mid",
+    "vix_regime_high",
+    "nifty_rv_vs_vix",
+    "inr_nifty_divergence",
+    "nifty_up_freq_20"
+  ],
+  "dir_labels": [
+    "DOWN",
+    "FLAT",
+    "UP"
+  ],
+  "components": [
+    "XGBoost",
+    "LightGBM",
+    "LogisticRegression-meta",
+    "Isotonic-calibration"
+  ],
+  "walk_forward_base": [
+    {
+      "fold": 1,
+      "test_window": "2021-01-01\u21922021-12-31",
+      "test_n": 169,
+      "xgb_acc": 50.3,
+      "xgb_dir_only": 52.45,
+      "lgb_acc": 49.7,
+      "lgb_dir_only": 51.75
+    },
+    {
+      "fold": 2,
+      "test_window": "2022-01-01\u21922022-12-31",
+      "test_n": 228,
+      "xgb_acc": 56.14,
+      "xgb_dir_only": 59.9,
+      "lgb_acc": 56.58,
+      "lgb_dir_only": 59.9
+    },
+    {
+      "fold": 3,
+      "test_window": "2023-01-01\u21922023-12-31",
+      "test_n": 205,
+      "xgb_acc": 46.83,
+      "xgb_dir_only": 49.64,
+      "lgb_acc": 46.34,
+      "lgb_dir_only": 50.0
+    },
+    {
+      "fold": 4,
+      "test_window": "2024-01-01\u21922024-12-31",
+      "test_n": 184,
+      "xgb_acc": 44.57,
+      "xgb_dir_only": 45.83,
+      "lgb_acc": 47.83,
+      "lgb_dir_only": 50.0
+    },
+    {
+      "fold": 5,
+      "test_window": "2025-01-01\u21922025-12-31",
+      "test_n": 249,
+      "xgb_acc": 48.19,
+      "xgb_dir_only": 50.0,
+      "lgb_acc": 47.39,
+      "lgb_dir_only": 48.88
+    }
+  ],
+  "walk_forward_stacked": {
+    "uncalibrated": {
+      "acc_3class": 49.57,
+      "dir_only": 53.16
+    },
+    "calibrated": {
+      "acc_3class": 50.24,
+      "dir_only": 52.83
+    },
+    "conviction": [
+      {
+        "threshold": 0.0,
+        "trades": 778,
+        "freq_pct": 75.2,
+        "dir_acc_pct": 52.8
+      },
+      {
+        "threshold": 0.4,
+        "trades": 701,
+        "freq_pct": 67.7,
+        "dir_acc_pct": 54.4
+      },
+      {
+        "threshold": 0.45,
+        "trades": 476,
+        "freq_pct": 46.0,
+        "dir_acc_pct": 60.1
+      },
+      {
+        "threshold": 0.5,
+        "trades": 263,
+        "freq_pct": 25.4,
+        "dir_acc_pct": 70.7
+      },
+      {
+        "threshold": 0.55,
+        "trades": 233,
+        "freq_pct": 22.5,
+        "dir_acc_pct": 74.7
+      },
+      {
+        "threshold": 0.6,
+        "trades": 187,
+        "freq_pct": 18.1,
+        "dir_acc_pct": 78.6
+      },
+      {
+        "threshold": 0.65,
+        "trades": 167,
+        "freq_pct": 16.1,
+        "dir_acc_pct": 80.8
+      },
+      {
+        "threshold": 0.7,
+        "trades": 143,
+        "freq_pct": 13.8,
+        "dir_acc_pct": 81.1
+      }
+    ]
+  },
+  "holdout": {
+    "acc_3class_pct": 73.33,
+    "dir_only_acc_pct": 78.57,
+    "n": 15
+  }
+}

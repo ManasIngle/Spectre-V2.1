@@ -1,0 +1,19 @@
+{
+  "holdout_n": 15,
+  "holdout_dates": [
+    "2026-04-01",
+    "2026-04-23"
+  ],
+  "close_prediction": {
+    "mae_pct": 1.023,
+    "rmse_pct": 1.332
+  },
+  "direction": {
+    "accuracy_3class": 26.7,
+    "directional_only_accuracy_pct": 26.7,
+    "directional_only_n": 15
+  },
+  "magnitude": {
+    "accuracy_4class_pct": 40.0
+  }
+}

@@ -1,0 +1,2 @@
+prediction_date,asof_session,target_date,prev_close,predicted_close,predicted_change_pct,direction,direction_confidence,p_down,p_flat,p_up,magnitude_bucket,abs_change_pct,model_version,actual_close,abs_error_pct,direction_correct
+2026-04-25,2026-04-23,2026-04-24,24173.05,24179.39,0.026,DOWN,0.352,0.352,0.302,0.345,TINY,0.026,v3,,,

@@ -10,6 +10,7 @@ import InstitutionalView from './components/InstitutionalView'
 import NewsView from './components/NewsView'
 import MLLogsView from './components/MLLogsView'
 import CockpitView from './components/CockpitView'
+import OvernightView from './components/OvernightView'
 
 const API = ''
 
@@ -23,6 +24,7 @@ const TABS = [
   { key: 'institutional',label: 'Institutional' },
   { key: 'news',         label: 'News' },
   { key: 'ml-logs',      label: 'ML Logs' },
+  { key: 'overnight',    label: 'Overnight' },
 ]
 
 function App() {
@@ -76,7 +78,7 @@ function App() {
     doFetch()
 
     // Auto-refresh: 30s for trader view, 3 min for heatmap, others handle themselves
-    if (view !== 'oi' && view !== 'cockpit' && view !== 'signals' && view !== 'direction' && view !== 'institutional') {
+    if (view !== 'oi' && view !== 'cockpit' && view !== 'signals' && view !== 'direction' && view !== 'institutional' && view !== 'overnight') {
       const refreshMs = view === 'table' ? 30000 : 180000
       timerRef.current = setInterval(doFetch, refreshMs)
     }
@@ -155,6 +157,8 @@ function App() {
           <MLLogsView />
         ) : view === 'institutional' ? (
           <InstitutionalView />
+        ) : view === 'overnight' ? (
+          <OvernightView />
         ) : (
           <NewsView />
         )}

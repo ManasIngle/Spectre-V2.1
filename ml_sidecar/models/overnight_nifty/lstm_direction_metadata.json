@@ -1,0 +1,165 @@
+{
+  "model_name": "overnight_nifty_lstm_direction",
+  "version": "v2",
+  "trained_at": "2026-04-24T19:41:21.697140Z",
+  "seq_len": 60,
+  "n_features": 65,
+  "feature_columns": [
+    "nifty_ret_1",
+    "nifty_ret_5",
+    "nifty_ret_20",
+    "nifty_rsi_14",
+    "nifty_range_pct",
+    "nifty_vol_20",
+    "nifty_vs_ma20",
+    "nifty_vs_ma50",
+    "nifty_volz_20",
+    "sp500_ret_1",
+    "sp500_ret_5",
+    "sp500_ret_20",
+    "nasdaq_ret_1",
+    "nasdaq_ret_5",
+    "nasdaq_ret_20",
+    "vix_ret_1",
+    "vix_ret_5",
+    "vix_ret_20",
+    "us10y_ret_1",
+    "us10y_ret_5",
+    "us10y_ret_20",
+    "dxy_ret_1",
+    "dxy_ret_5",
+    "dxy_ret_20",
+    "usdinr_ret_1",
+    "usdinr_ret_5",
+    "usdinr_ret_20",
+    "brent_ret_1",
+    "brent_ret_5",
+    "brent_ret_20",
+    "gold_ret_1",
+    "gold_ret_5",
+    "gold_ret_20",
+    "copper_ret_1",
+    "copper_ret_5",
+    "copper_ret_20",
+    "nikkei_ret_1",
+    "nikkei_ret_5",
+    "nikkei_ret_20",
+    "hsi_ret_1",
+    "hsi_ret_5",
+    "hsi_ret_20",
+    "kospi_ret_1",
+    "kospi_ret_5",
+    "kospi_ret_20",
+    "move_ret_1",
+    "move_ret_5",
+    "move_ret_20",
+    "ftse_ret_1",
+    "ftse_ret_5",
+    "ftse_ret_20",
+    "dax_ret_1",
+    "dax_ret_5",
+    "dax_ret_20",
+    "vix_level",
+    "vix_vs_ma20",
+    "usdinr_level",
+    "us10y_level",
+    "dow",
+    "month",
+    "dow_0",
+    "dow_1",
+    "dow_2",
+    "dow_3",
+    "dow_4"
+  ],
+  "dir_labels": [
+    "DOWN",
+    "FLAT",
+    "UP"
+  ],
+  "walk_forward": {
+    "avg_3class_acc_pct": 36.55,
+    "avg_directional_only_acc_pct": 35.96,
+    "folds": [
+      {
+        "fold": 1,
+        "train_n": 769,
+        "test_window": "2021-01-01 \u2192 2021-12-31",
+        "test_n": 169,
+        "accuracy_3class": 39.64,
+        "directional_only_acc": 39.86,
+        "directional_only_n": 138,
+        "predicted_dist": {
+          "DOWN": 0,
+          "FLAT": 31,
+          "UP": 138
+        }
+      },
+      {
+        "fold": 2,
+        "train_n": 921,
+        "test_window": "2022-01-01 \u2192 2022-12-31",
+        "test_n": 228,
+        "accuracy_3class": 38.6,
+        "directional_only_acc": 38.6,
+        "directional_only_n": 228,
+        "predicted_dist": {
+          "DOWN": 0,
+          "FLAT": 0,
+          "UP": 228
+        }
+      },
+      {
+        "fold": 3,
+        "train_n": 1126,
+        "test_window": "2023-01-01 \u2192 2023-12-31",
+        "test_n": 205,
+        "accuracy_3class": 35.61,
+        "directional_only_acc": 35.71,
+        "directional_only_n": 42,
+        "predicted_dist": {
+          "DOWN": 24,
+          "FLAT": 163,
+          "UP": 18
+        }
+      },
+      {
+        "fold": 4,
+        "train_n": 1311,
+        "test_window": "2024-01-01 \u2192 2024-12-31",
+        "test_n": 184,
+        "accuracy_3class": 33.15,
+        "directional_only_acc": 30.51,
+        "directional_only_n": 118,
+        "predicted_dist": {
+          "DOWN": 27,
+          "FLAT": 66,
+          "UP": 91
+        }
+      },
+      {
+        "fold": 5,
+        "train_n": 1476,
+        "test_window": "2025-01-01 \u2192 2025-12-31",
+        "test_n": 249,
+        "accuracy_3class": 35.74,
+        "directional_only_acc": 35.1,
+        "directional_only_n": 245,
+        "predicted_dist": {
+          "DOWN": 26,
+          "FLAT": 4,
+          "UP": 219
+        }
+      }
+    ]
+  },
+  "holdout": {
+    "accuracy_3class_pct": 20.0,
+    "directional_only_acc_pct": 20.0,
+    "directional_only_n": 15,
+    "predicted_dist": {
+      "DOWN": 12,
+      "FLAT": 0,
+      "UP": 3
+    }
+  }
+}

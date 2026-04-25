@@ -1112,8 +1112,137 @@ async def predict_scalper():
         return {"error": str(e), "trace": traceback.format_exc()}
 
 
+# ─── Overnight Nifty (v3 stacked + regression) ────────────────────────────────
+import sys as _sys
+_OVERNIGHT_DIR = os.path.join(ML_DIR, "overnight_nifty")
+if _OVERNIGHT_DIR not in _sys.path:
+    _sys.path.insert(0, _OVERNIGHT_DIR)
+
+_overnight_loaded = False
+
+def _try_load_overnight():
+    """Lazy-load overnight model on first use; returns the predict module or None."""
+    global _overnight_loaded
+    try:
+        import predict_overnight as po
+        po.load_models()
+        _overnight_loaded = True
+        return po
+    except Exception as e:
+        print(f"Overnight Nifty model not loaded: {e}")
+        return None
+
+
+@app.get("/predict_nifty_overnight")
+async def predict_nifty_overnight():
+    """v3 stacked direction + regression close prediction for the next NSE session.
+    Returns the latest cached prediction from the prediction log if today's row
+    is already there; otherwise runs a fresh prediction."""
+    po = _try_load_overnight()
+    if po is None:
+        return {"error": "overnight model not available — train artifacts missing"}
+    try:
+        return po.predict_and_log()
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "trace": traceback.format_exc()}
+
+
+@app.get("/predict_nifty_overnight/log")
+async def predict_nifty_overnight_log(limit: int = 30):
+    """Return the last `limit` rows of overnight_predictions.csv (latest first)."""
+    log_path = os.path.join(_OVERNIGHT_DIR, "data", "overnight_predictions.csv")
+    if not os.path.exists(log_path):
+        return {"error": "no prediction log yet", "rows": []}
+    try:
+        df = pd.read_csv(log_path).tail(int(limit))
+        # Replace NaN with None — strict JSON doesn't allow NaN, and pending
+        # actual_close/abs_error/direction_correct are legitimately NaN.
+        df = df.astype(object).where(pd.notna(df), None)
+        return {"rows": df.to_dict("records"), "n": len(df)}
+    except Exception as e:
+        return {"error": str(e), "rows": []}
+
+
+# ─── APScheduler: daily refresh + predict + backfill ──────────────────────────
+_overnight_scheduler = None
+
+def _overnight_refresh_and_predict():
+    """Refetch raw data (incremental top-up) → run predict_and_log."""
+    try:
+        import data_fetcher as df_mod
+        print("[cron] Refreshing overnight raw data…")
+        df_mod.save(df_mod.fetch_all(years=10))
+    except Exception as e:
+        print(f"[cron] data refresh failed: {e}")
+        # still try to predict on whatever data is on disk
+    try:
+        po = _try_load_overnight()
+        if po is None:
+            return
+        result = po.predict_and_log()
+        print(f"[cron] overnight prediction logged: dir={result.get('direction')} "
+              f"conf={result.get('direction_confidence')} "
+              f"target={result.get('target_date')}")
+    except Exception as e:
+        import traceback
+        print(f"[cron] predict failed: {e}\n{traceback.format_exc()}")
+
+
+def _overnight_backfill_actuals():
+    """Refetch raw data (so today's NSE close is captured) and backfill the CSV."""
+    try:
+        import data_fetcher as df_mod
+        df_mod.save(df_mod.fetch_all(years=10))
+    except Exception as e:
+        print(f"[cron] data refresh (backfill) failed: {e}")
+    try:
+        po = _try_load_overnight()
+        if po is None:
+            return
+        n = po.backfill_actuals()
+        print(f"[cron] backfilled {n} rows of actual closes")
+    except Exception as e:
+        print(f"[cron] backfill failed: {e}")
+
+
+@app.on_event("startup")
+def _start_overnight_scheduler():
+    """Eager-load the overnight model and schedule:
+      • 03:30 IST daily — refresh data + run prediction (after US close, during Asia open)
+      • 16:00 IST daily — backfill actual closes (NSE closes 15:30 IST)
+    Disabled if SPECTRE_DISABLE_SCHEDULER=1 in env."""
+    global _overnight_scheduler
+    _try_load_overnight()  # eager load so /health reflects state immediately
+    if os.environ.get("SPECTRE_DISABLE_SCHEDULER") == "1":
+        print("Overnight scheduler disabled via SPECTRE_DISABLE_SCHEDULER=1")
+        return
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        try:
+            ist = zoneinfo.ZoneInfo("Asia/Kolkata")
+        except Exception:
+            import pytz
+            ist = pytz.timezone("Asia/Kolkata")
+        sched = BackgroundScheduler(timezone=ist)
+        sched.add_job(_overnight_refresh_and_predict,
+                      CronTrigger(hour=3, minute=30, timezone=ist),
+                      id="overnight_predict", replace_existing=True,
+                      misfire_grace_time=3600)
+        sched.add_job(_overnight_backfill_actuals,
+                      CronTrigger(hour=16, minute=0, timezone=ist),
+                      id="overnight_backfill", replace_existing=True,
+                      misfire_grace_time=3600)
+        sched.start()
+        _overnight_scheduler = sched
+        print("Overnight Nifty scheduler started — 03:30 IST predict, 16:00 IST backfill")
+    except Exception as e:
+        print(f"Overnight scheduler not started: {e}")
+
+
 @app.get("/health")
-def health(): return {"status":"ok","rolling_model_loaded":_rolling_xgb is not None, "cross_model_loaded": _cross_xgb is not None, "old_model_loaded": _old_direction_xgb is not None, "scalper_loaded": _scalper_lstm is not None}
+def health(): return {"status":"ok","rolling_model_loaded":_rolling_xgb is not None, "cross_model_loaded": _cross_xgb is not None, "old_model_loaded": _old_direction_xgb is not None, "scalper_loaded": _scalper_lstm is not None, "overnight_loaded": _overnight_loaded, "overnight_scheduler_running": _overnight_scheduler is not None and _overnight_scheduler.running if _overnight_scheduler else False}
 
 @app.get("/morning-predict")
 async def morning_predict():
