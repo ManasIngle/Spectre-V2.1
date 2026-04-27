@@ -48,6 +48,16 @@ TICKERS = {
     # we attempt below and fall back gracefully.
 }
 
+# Indian ADRs — US-listed, trade on NYSE/NASDAQ, close ~02:30 IST (known before NSE opens).
+# Combined ~20% of Nifty index weight. Each ADR is a direct overnight signal for its sector.
+ADR_TICKERS = {
+    "infy_adr":  "INFY",   # Infosys — ~4% Nifty weight
+    "hdb_adr":   "HDB",    # HDFC Bank — ~13% Nifty weight
+    "ibn_adr":   "IBN",    # ICICI Bank — ~8% Nifty weight
+    "wit_adr":   "WIT",    # Wipro
+    "ttm_adr":   "TTM",    # Tata Motors
+}
+
 # Best-effort tickers — yfinance coverage is unreliable. Skipped without erroring.
 OPTIONAL_TICKERS = {
     "india10y": "^IN10YR",    # often missing
@@ -124,6 +134,17 @@ def fetch_all(years: int = 10) -> pd.DataFrame:
     out = frames[0]
     for f in frames[1:]:
         out = out.join(f, how="outer")
+
+    # Indian ADR tickers — reliable yfinance, US-listed, known before NSE opens
+    print("\nIndian ADRs:")
+    for name, sym in ADR_TICKERS.items():
+        df = _download(sym, start)
+        if df is not None and "Close" in df.columns and len(df) > 200:
+            print(f"  ✓ {name:12s} ({sym}) {len(df)} rows")
+            out = out.join(df[["Close"]].rename(columns={"Close": f"{name}_close"}), how="outer")
+        else:
+            print(f"  ✗ {name:12s} ({sym}) not available; skipping")
+        time.sleep(0.4)
 
     # Optional tickers — try silently, skip on failure
     print("\nOptional tickers (best-effort):")

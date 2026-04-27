@@ -144,6 +144,26 @@ def build_features(raw: pd.DataFrame) -> pd.DataFrame:
     # Trend strength on Nifty (ADX-like, simplified): rolling % of up days in last 20
     f["nifty_up_freq_20"] = (_safe_pct(nclose, 1).shift(1) > 0).rolling(20).mean()
 
+    # ── Indian ADR composite features ─────────────────────────────────────
+    # ADRs trade on NYSE (close ~02:30 IST) — known before NSE opens.
+    # Covers ~25% of Nifty weight. A coordinated ADR move is a direct signal.
+    adr_cols = [c for c in df.columns if c.endswith("_adr_close")]
+    if len(adr_cols) >= 2:
+        adr_rets = pd.DataFrame({c: _safe_pct(df[c], 1) for c in adr_cols})
+        # Count of ADRs up overnight
+        f["adr_bull_count"] = (adr_rets > 0).sum(axis=1).astype(float)
+        # Average overnight return across ADRs (equal-weight)
+        f["adr_avg_ret_1"] = adr_rets.mean(axis=1)
+        # ADR strength vs S&P500: are Indian stocks beating the broad market?
+        if "sp500_close" in df.columns:
+            sp_ret = _safe_pct(df["sp500_close"], 1)
+            f["adr_vs_sp500"] = f["adr_avg_ret_1"] - sp_ret
+        # Heavyweight-weighted composite: HDB+IBN have higher Nifty weight
+        heavy_cols = [c for c in adr_cols if any(x in c for x in ("hdb", "ibn", "infy"))]
+        if heavy_cols:
+            heavy_rets = pd.DataFrame({c: _safe_pct(df[c], 1) for c in heavy_cols})
+            f["adr_heavy_avg_ret"] = heavy_rets.mean(axis=1)
+
     # ── Targets ────────────────────────────────────────────────────────────
     # For row T: prev_close = nifty_close[T-1], next_close = nifty_close[T]
     f["prev_close"] = df["nifty_close"].shift(1)
@@ -176,6 +196,9 @@ FEATURE_PREFIXES = (
     "nifty_", "sp500_", "nasdaq_", "dow_", "vix_", "us10y_", "dxy_", "usdinr_",
     "brent_", "gold_", "nikkei_", "gift_", "vix_level", "vix_vs_ma20",
     "usdinr_level", "us10y_level", "month",
+    # Indian ADRs
+    "infy_adr_", "hdb_adr_", "ibn_adr_", "wit_adr_", "ttm_adr_",
+    "adr_bull_count", "adr_avg_ret", "adr_vs_sp500", "adr_heavy_avg_ret",
 )
 TARGET_COLS = {"prev_close", "next_close", "y_logret", "y_dir", "y_mag"}
 
