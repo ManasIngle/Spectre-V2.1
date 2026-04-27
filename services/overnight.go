@@ -23,6 +23,20 @@ type OvernightPrediction struct {
 	ModelVersion       string             `json:"model_version"`
 	FeatureFreshness   string             `json:"feature_freshness"`
 	Error              string             `json:"error,omitempty"`
+	ErrorCode          string             `json:"error_code,omitempty"`
+	Message            string             `json:"message,omitempty"`
+	FetchInProgress    bool               `json:"fetch_in_progress,omitempty"`
+}
+
+// OvernightDataStatus mirrors the sidecar's /overnight_data_status response.
+type OvernightDataStatus struct {
+	Exists           bool    `json:"exists"`
+	LastModified     string  `json:"last_modified,omitempty"`
+	AgeHours         float64 `json:"age_hours,omitempty"`
+	FetchInProgress  bool    `json:"fetch_in_progress"`
+	FetchStartedAt   string  `json:"fetch_started_at,omitempty"`
+	LastFetchStatus  string  `json:"last_fetch_status,omitempty"`
+	LastFetchAt      string  `json:"last_fetch_at,omitempty"`
 }
 
 // OvernightLogEntry is one row from /predict_nifty_overnight/log.
@@ -59,6 +73,10 @@ func sidecarGet(url string) (*http.Response, error) {
 // FetchOvernightPrediction calls the sidecar and caches the result for 10 min.
 // The overnight model only generates one prediction per day so a 10-min TTL
 // avoids hammering the sidecar without hiding stale data meaningfully.
+//
+// On structured errors (data_missing / model_not_loaded) we return the
+// prediction object with the error fields populated so the UI can render a
+// proper backfill button. Only unreachable / parse failures bubble as errors.
 func FetchOvernightPrediction() (*OvernightPrediction, error) {
 	if v, ok := overnightCache.Get("pred"); ok {
 		return v.(*OvernightPrediction), nil
@@ -79,11 +97,55 @@ func FetchOvernightPrediction() (*OvernightPrediction, error) {
 	if err := json.Unmarshal(body, &pred); err != nil {
 		return nil, fmt.Errorf("overnight sidecar parse: %v", err)
 	}
+	// Structured error → return as-is so frontend can render the backfill flow.
+	// Don't cache errors (we want the next fetch to re-check after backfill completes).
 	if pred.Error != "" {
-		return nil, fmt.Errorf("overnight sidecar: %s", pred.Error)
+		return &pred, nil
 	}
 	overnightCache.Set("pred", &pred, 10*time.Minute)
 	return &pred, nil
+}
+
+// RefreshOvernightData triggers a background backfill on the sidecar.
+// Returns the sidecar's status payload (may say a fetch was already running).
+func RefreshOvernightData() (map[string]interface{}, error) {
+	resp, err := mlClient.Post("http://ml-sidecar:8240/refresh_overnight_data", "application/json", nil)
+	if err != nil {
+		resp, err = mlClient.Post("http://localhost:8240/refresh_overnight_data", "application/json", nil)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("refresh overnight unreachable: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := readBody(resp, 1<<20)
+	if err != nil {
+		return nil, fmt.Errorf("refresh overnight read: %w", err)
+	}
+	out := map[string]interface{}{}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("refresh overnight parse: %v", err)
+	}
+	// Invalidate cached error/prediction so the next fetch sees fresh state.
+	overnightCache.Delete("pred")
+	return out, nil
+}
+
+// FetchOvernightDataStatus pulls the current parquet/fetch status from the sidecar.
+func FetchOvernightDataStatus() (*OvernightDataStatus, error) {
+	resp, err := sidecarGet("/overnight_data_status")
+	if err != nil {
+		return nil, fmt.Errorf("overnight status unreachable: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := readBody(resp, 1<<20)
+	if err != nil {
+		return nil, fmt.Errorf("overnight status read: %w", err)
+	}
+	var st OvernightDataStatus
+	if err := json.Unmarshal(body, &st); err != nil {
+		return nil, fmt.Errorf("overnight status parse: %v", err)
+	}
+	return &st, nil
 }
 
 // FetchOvernightLog fetches the last `limit` predictions from the log endpoint.

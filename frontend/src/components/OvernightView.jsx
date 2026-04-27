@@ -208,34 +208,147 @@ const HistoryTable = ({ rows }) => {
     );
 };
 
+/* ────────────────────────── Backfill banner ─────────────────────── */
+const BackfillBanner = ({ status, busy, onRefresh, onRetry, lastError }) => {
+    const inProg = busy || status?.fetch_in_progress;
+    const exists = status?.exists;
+    const ageHours = status?.age_hours;
+
+    let body;
+    if (inProg) {
+        body = (
+            <>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>Backfilling overnight data…</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Downloading 10 years of cross-asset data (~3 minutes). This page will auto-refresh when done.
+                </div>
+                {status?.fetch_started_at && (
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                        Started {new Date(status.fetch_started_at).toLocaleTimeString()}
+                    </div>
+                )}
+            </>
+        );
+    } else if (!exists) {
+        body = (
+            <>
+                <div style={{ fontWeight: 700, marginBottom: 4, color: '#ef4444' }}>
+                    Overnight data not initialized
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: 8 }}>
+                    {lastError || 'The raw data file is missing. This usually happens on a fresh deploy before the 03:30 IST cron runs.'}
+                </div>
+                <button onClick={onRefresh} className="nav-tab" style={{
+                    background: 'linear-gradient(90deg, #0ff, #f0f)', color: '#000', fontWeight: 700,
+                    padding: '0.4rem 0.9rem', border: 'none',
+                }}>Backfill now (~3 min)</button>
+            </>
+        );
+    } else {
+        // Has data but stale — give user the option to refresh
+        body = (
+            <>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Data last refreshed {ageHours != null ? `${ageHours}h ago` : 'unknown'} · auto-refresh at 03:30 IST daily
+                </div>
+                <button onClick={onRefresh} className="nav-tab" style={{
+                    marginTop: 4, padding: '0.25rem 0.6rem', fontSize: '0.75rem',
+                }}>Refresh now</button>
+                {lastError && (
+                    <div style={{ marginTop: 8, color: '#ef4444', fontSize: '0.75rem' }}>
+                        Last prediction error: {lastError}
+                        <button onClick={onRetry} className="nav-tab" style={{
+                            marginLeft: 8, padding: '0.15rem 0.5rem', fontSize: '0.7rem',
+                        }}>Retry</button>
+                    </div>
+                )}
+            </>
+        );
+    }
+
+    const bg = inProg ? 'rgba(0,255,255,0.08)' :
+               !exists ? 'rgba(239,68,68,0.1)' :
+               'rgba(255,255,255,0.03)';
+    const border = inProg ? 'rgba(0,255,255,0.25)' :
+                   !exists ? 'rgba(239,68,68,0.2)' :
+                   'rgba(255,255,255,0.08)';
+
+    return (
+        <div style={{
+            padding: '0.75rem 1rem', borderRadius: 8,
+            background: bg, border: `1px solid ${border}`,
+        }}>
+            {body}
+        </div>
+    );
+};
+
 /* ────────────────────────── Main view ───────────────────────────── */
 const OvernightView = () => {
     const [pred, setPred]     = useState(null);
     const [log, setLog]       = useState([]);
     const [err, setErr]       = useState(null);
+    const [errCode, setErrCode] = useState(null);
+    const [status, setStatus] = useState(null);
+    const [busy, setBusy]     = useState(false);
     const [lastUpdate, setLastUpdate] = useState(null);
 
     const fetchAll = useCallback(async () => {
         try {
-            const [predRes, logRes] = await Promise.all([
+            const [predRes, logRes, statusRes] = await Promise.all([
                 fetch('/api/overnight-prediction').then(r => r.json()),
                 fetch('/api/overnight-log?limit=30').then(r => r.json()),
+                fetch('/api/overnight-prediction/status').then(r => r.json()).catch(() => null),
             ]);
-            if (predRes.error) { setErr(predRes.error); return; }
-            setPred(predRes);
+            setStatus(statusRes);
             setLog(Array.isArray(logRes) ? logRes : []);
-            setErr(null);
+            if (predRes.error) {
+                setErr(predRes.message || predRes.error);
+                setErrCode(predRes.error_code || predRes.error);
+                setPred(null);
+            } else {
+                setPred(predRes);
+                setErr(null);
+                setErrCode(null);
+            }
             setLastUpdate(new Date());
         } catch (e) {
             setErr(e.message);
+            setErrCode('fetch_failed');
         }
     }, []);
 
     useEffect(() => {
         fetchAll();
-        const id = setInterval(fetchAll, 10 * 60 * 1000); // refresh every 10 min
+        const id = setInterval(fetchAll, 10 * 60 * 1000); // background refresh every 10 min
         return () => clearInterval(id);
     }, [fetchAll]);
+
+    // Fast-poll while a fetch is running, so the UI updates as soon as it completes
+    useEffect(() => {
+        if (!status?.fetch_in_progress && !busy) return;
+        const id = setInterval(fetchAll, 8000);
+        return () => clearInterval(id);
+    }, [status?.fetch_in_progress, busy, fetchAll]);
+
+    const onRefresh = async () => {
+        setBusy(true);
+        try {
+            await fetch('/api/overnight-prediction/refresh', { method: 'POST' });
+            await fetchAll();
+        } catch (e) {
+            setErr(e.message);
+        } finally {
+            // Don't clear busy until status confirms it's running (fast-poll picks it up)
+            setTimeout(() => setBusy(false), 2000);
+        }
+    };
+
+    const onRetry = () => fetchAll();
+
+    const showBanner = errCode === 'data_missing' || errCode === 'model_not_loaded' ||
+                       (status && (!status.exists || status.fetch_in_progress)) ||
+                       (status && status.age_hours != null && status.age_hours > 26);
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: 900, margin: '0 auto' }}>
@@ -251,18 +364,32 @@ const OvernightView = () => {
                 )}
             </div>
 
-            {err && (
+            {showBanner && (
+                <BackfillBanner
+                    status={status}
+                    busy={busy}
+                    onRefresh={onRefresh}
+                    onRetry={onRetry}
+                    lastError={err}
+                />
+            )}
+
+            {err && !showBanner && (
                 <div style={{
                     padding: '0.75rem 1rem', borderRadius: 8,
                     background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)',
                     fontSize: '0.8rem', color: '#ef4444',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 }}>
-                    {err}
+                    <span>{err}</span>
+                    <button onClick={onRetry} className="nav-tab" style={{ padding: '0.2rem 0.6rem', fontSize: '0.75rem' }}>
+                        Retry
+                    </button>
                 </div>
             )}
 
-            {/* Prediction card */}
-            <PredictionCard data={pred} />
+            {/* Prediction card — only show when we actually have data */}
+            {pred && <PredictionCard data={pred} />}
 
             {/* History table */}
             <HistoryTable rows={log} />

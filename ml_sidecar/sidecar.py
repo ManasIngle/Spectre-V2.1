@@ -1120,6 +1120,17 @@ if _OVERNIGHT_DIR not in _sys.path:
 
 _overnight_loaded = False
 
+# Backfill state — protects against concurrent fetches and powers the UI status endpoint
+import threading as _threading
+from datetime import datetime as _datetime
+_OVERNIGHT_RAW_PARQUET = os.path.join(_OVERNIGHT_DIR, "data", "overnight_raw.parquet")
+_overnight_fetch_lock = _threading.Lock()
+_overnight_fetch_in_progress = False
+_overnight_fetch_started_at = None
+_overnight_last_fetch_status = None  # "ok" | "failed: <msg>" | None
+_overnight_last_fetch_at = None
+
+
 def _try_load_overnight():
     """Lazy-load overnight model on first use; returns the predict module or None."""
     global _overnight_loaded
@@ -1133,19 +1144,117 @@ def _try_load_overnight():
         return None
 
 
+def _do_overnight_fetch_and_predict(predict_after: bool = True):
+    """Refresh the overnight raw parquet (10y) and optionally re-run the prediction.
+    Idempotent — exits immediately if a fetch is already in progress.
+    Safe to call from APScheduler, /refresh_overnight_data, or startup bootstrap.
+    """
+    global _overnight_fetch_in_progress, _overnight_fetch_started_at
+    global _overnight_last_fetch_status, _overnight_last_fetch_at
+
+    with _overnight_fetch_lock:
+        if _overnight_fetch_in_progress:
+            print("[overnight-fetch] skipped — fetch already in progress")
+            return
+        _overnight_fetch_in_progress = True
+        _overnight_fetch_started_at = _datetime.utcnow().isoformat() + "Z"
+
+    try:
+        import data_fetcher as df_mod
+        print("[overnight-fetch] downloading raw data (10y, ~3 min)…")
+        df_mod.save(df_mod.fetch_all(years=10))
+        _overnight_last_fetch_status = "ok"
+        _overnight_last_fetch_at = _datetime.utcnow().isoformat() + "Z"
+        print("[overnight-fetch] raw data refresh complete")
+
+        if predict_after:
+            po = _try_load_overnight()
+            if po is None:
+                print("[overnight-fetch] model not loaded — skipping prediction")
+                return
+            try:
+                result = po.predict_and_log()
+                print(f"[overnight-fetch] prediction generated: dir={result.get('direction')} "
+                      f"conf={result.get('direction_confidence')} target={result.get('target_date')}")
+            except Exception as e:
+                print(f"[overnight-fetch] predict failed after fetch: {e}")
+    except Exception as e:
+        import traceback
+        _overnight_last_fetch_status = f"failed: {e}"
+        _overnight_last_fetch_at = _datetime.utcnow().isoformat() + "Z"
+        print(f"[overnight-fetch] FAILED: {e}\n{traceback.format_exc()}")
+    finally:
+        with _overnight_fetch_lock:
+            _overnight_fetch_in_progress = False
+
+
 @app.get("/predict_nifty_overnight")
 async def predict_nifty_overnight():
     """v3 stacked direction + regression close prediction for the next NSE session.
     Returns the latest cached prediction from the prediction log if today's row
     is already there; otherwise runs a fresh prediction."""
+    if not os.path.exists(_OVERNIGHT_RAW_PARQUET):
+        return {
+            "error": "data_missing",
+            "error_code": "data_missing",
+            "message": "Overnight raw data not available yet. Trigger a backfill from the UI or wait for the 03:30 IST cron.",
+            "fetch_in_progress": _overnight_fetch_in_progress,
+        }
     po = _try_load_overnight()
     if po is None:
-        return {"error": "overnight model not available — train artifacts missing"}
+        return {
+            "error": "model_not_loaded",
+            "error_code": "model_not_loaded",
+            "message": "Overnight model artifacts missing — check the deployment.",
+        }
     try:
         return po.predict_and_log()
+    except FileNotFoundError as e:
+        return {
+            "error": "data_missing",
+            "error_code": "data_missing",
+            "message": str(e),
+            "fetch_in_progress": _overnight_fetch_in_progress,
+        }
     except Exception as e:
         import traceback
         return {"error": str(e), "trace": traceback.format_exc()}
+
+
+@app.post("/refresh_overnight_data")
+def refresh_overnight_data():
+    """Trigger a background refresh of the overnight raw parquet + a fresh prediction.
+    Returns immediately. Poll /overnight_data_status to track progress."""
+    if _overnight_fetch_in_progress:
+        return {
+            "started": False,
+            "fetch_in_progress": True,
+            "message": "fetch already running",
+            "started_at": _overnight_fetch_started_at,
+        }
+    _threading.Thread(target=_do_overnight_fetch_and_predict, daemon=True).start()
+    return {"started": True, "fetch_in_progress": True}
+
+
+@app.get("/overnight_data_status")
+def overnight_data_status():
+    """UI-facing state of the overnight raw parquet + fetch lifecycle."""
+    exists = os.path.exists(_OVERNIGHT_RAW_PARQUET)
+    last_modified = None
+    age_hours = None
+    if exists:
+        mtime = os.path.getmtime(_OVERNIGHT_RAW_PARQUET)
+        last_modified = _datetime.fromtimestamp(mtime).isoformat()
+        age_hours = round((time.time() - mtime) / 3600, 1)
+    return {
+        "exists": exists,
+        "last_modified": last_modified,
+        "age_hours": age_hours,
+        "fetch_in_progress": _overnight_fetch_in_progress,
+        "fetch_started_at": _overnight_fetch_started_at,
+        "last_fetch_status": _overnight_last_fetch_status,
+        "last_fetch_at": _overnight_last_fetch_at,
+    }
 
 
 @app.get("/predict_nifty_overnight/log")
@@ -1168,25 +1277,8 @@ async def predict_nifty_overnight_log(limit: int = 30):
 _overnight_scheduler = None
 
 def _overnight_refresh_and_predict():
-    """Refetch raw data (incremental top-up) → run predict_and_log."""
-    try:
-        import data_fetcher as df_mod
-        print("[cron] Refreshing overnight raw data…")
-        df_mod.save(df_mod.fetch_all(years=10))
-    except Exception as e:
-        print(f"[cron] data refresh failed: {e}")
-        # still try to predict on whatever data is on disk
-    try:
-        po = _try_load_overnight()
-        if po is None:
-            return
-        result = po.predict_and_log()
-        print(f"[cron] overnight prediction logged: dir={result.get('direction')} "
-              f"conf={result.get('direction_confidence')} "
-              f"target={result.get('target_date')}")
-    except Exception as e:
-        import traceback
-        print(f"[cron] predict failed: {e}\n{traceback.format_exc()}")
+    """Cron entry point — delegates to the shared lock-protected helper."""
+    _do_overnight_fetch_and_predict(predict_after=True)
 
 
 def _overnight_backfill_actuals():
@@ -1214,6 +1306,13 @@ def _start_overnight_scheduler():
     Disabled if SPECTRE_DISABLE_SCHEDULER=1 in env."""
     global _overnight_scheduler
     _try_load_overnight()  # eager load so /health reflects state immediately
+
+    # Auto-bootstrap: if the parquet doesn't exist yet (fresh deploy / new volume),
+    # kick off a background fetch so the user doesn't have to wait for 03:30 IST.
+    if not os.path.exists(_OVERNIGHT_RAW_PARQUET):
+        print("[startup] overnight parquet missing — kicking off background backfill")
+        _threading.Thread(target=_do_overnight_fetch_and_predict, daemon=True).start()
+
     if os.environ.get("SPECTRE_DISABLE_SCHEDULER") == "1":
         print("Overnight scheduler disabled via SPECTRE_DISABLE_SCHEDULER=1")
         return

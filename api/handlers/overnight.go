@@ -31,3 +31,24 @@ func GetOvernightLog(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, rows)
 }
+
+// RefreshOvernightData triggers a background backfill of the parquet + a fresh prediction.
+// Returns immediately. Frontend should poll /api/overnight-prediction/status until done.
+func RefreshOvernightData(c *gin.Context) {
+	out, err := services.RefreshOvernightData()
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// GetOvernightDataStatus returns parquet existence + fetch lifecycle state.
+func GetOvernightDataStatus(c *gin.Context) {
+	st, err := services.FetchOvernightDataStatus()
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, st)
+}
