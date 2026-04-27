@@ -178,6 +178,8 @@ type TickerRow struct {
 	Alligator string  `json:"Alligator"`
 	ADX       string  `json:"ADX"`
 	Volume    string  `json:"Vol"`
+	FRAMA     string  `json:"FRAMA"`
+	RS        string  `json:"RS"`
 }
 
 type MorningSignal struct {

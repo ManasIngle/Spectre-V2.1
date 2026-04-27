@@ -14,12 +14,15 @@ import (
 
 // GetDashboard returns indicator signals for the trader watchlist.
 func GetDashboard(c *gin.Context) {
-interval := c.DefaultQuery("interval", "3m")
+	interval := c.DefaultQuery("interval", "3m")
 	rangeVal := "5d"
 	switch interval {
 	case "15m", "30m", "60m":
 		rangeVal = "1mo"
 	}
+
+	// Fetch Nifty bars once for RS computation across all tickers.
+	niftyBars, _ := services.FetchOHLCV(config.NiftyTicker, interval, rangeVal, config.CacheTTLFast)
 
 	type result struct {
 		ticker string
@@ -44,7 +47,7 @@ interval := c.DefaultQuery("interval", "3m")
 				ch <- result{ticker: ticker, err: fmt.Errorf("insufficient bars: %d", len(bars))}
 				return
 			}
-			row, err := services.ComputeSignals(bars)
+			row, err := services.ComputeSignals(bars, niftyBars)
 			row.Script = services.DisplayName(ticker)
 			ch <- result{ticker: ticker, row: row, err: err}
 		}(t)

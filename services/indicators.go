@@ -223,10 +223,256 @@ func signalBias(s string) int {
 	return 0
 }
 
+// smma computes a simple moving average (used as Alligator approximation)
+func smma(src []float64, period int) []float64 {
+	out := make([]float64, len(src))
+	if len(src) < period {
+		copy(out, src)
+		return out
+	}
+	sum := 0.0
+	for i := 0; i < period; i++ {
+		sum += src[i]
+		out[i] = sum / float64(i+1)
+	}
+	out[period-1] = sum / float64(period)
+	for i := period; i < len(src); i++ {
+		out[i] = (out[i-1]*float64(period-1) + src[i]) / float64(period)
+	}
+	return out
+}
+
+// alligatorSignal returns Buy/Sell/Neutral using Williams Alligator (13/8, 8/5, 5/3).
+func alligatorSignal(bars []models.OHLCV) string {
+	n := len(bars)
+	if n < 30 {
+		return "Neutral"
+	}
+	med := make([]float64, n)
+	for i, b := range bars {
+		med[i] = (b.High + b.Low) / 2
+	}
+	jaw := smma(med, 13)
+	teeth := smma(med, 8)
+	lips := smma(med, 5)
+	// apply shifts: jaw+8, teeth+5, lips+3 — use the value from that many bars ago
+	shiftOf := func(arr []float64, shift int) float64 {
+		idx := n - 1 - shift
+		if idx < 0 {
+			return 0
+		}
+		return arr[idx]
+	}
+	j := shiftOf(jaw, 8)
+	t := shiftOf(teeth, 5)
+	l := shiftOf(lips, 3)
+	if j == 0 || t == 0 || l == 0 {
+		return "Neutral"
+	}
+	if l > t && t > j {
+		return "Buy"
+	}
+	if l < t && t < j {
+		return "Sell"
+	}
+	return "Neutral"
+}
+
+// framaSignal computes Fractal Adaptive Moving Average (period=16) and returns Buy/Sell.
+func framaSignal(c []float64) string {
+	period := 16
+	n := len(c)
+	if n < period+2 {
+		return "-"
+	}
+	half := period / 2
+	frama := make([]float64, n)
+	copy(frama, c)
+	for i := period; i < n; i++ {
+		h1, l1 := c[i-period], c[i-period]
+		for k := i - period; k < i-half; k++ {
+			if c[k] > h1 {
+				h1 = c[k]
+			}
+			if c[k] < l1 {
+				l1 = c[k]
+			}
+		}
+		h2, l2 := c[i-half], c[i-half]
+		for k := i - half; k < i; k++ {
+			if c[k] > h2 {
+				h2 = c[k]
+			}
+			if c[k] < l2 {
+				l2 = c[k]
+			}
+		}
+		h3, l3 := c[i-period], c[i-period]
+		for k := i - period; k < i; k++ {
+			if c[k] > h3 {
+				h3 = c[k]
+			}
+			if c[k] < l3 {
+				l3 = c[k]
+			}
+		}
+		n1 := (h1 - l1) / float64(half)
+		n2 := (h2 - l2) / float64(half)
+		n3 := (h3 - l3) / float64(period)
+		d := 1.0
+		if n1+n2 > 0 && n3 > 0 {
+			d = (math.Log(n1+n2) - math.Log(n3)) / math.Log(2)
+		}
+		alpha := math.Exp(-4.6 * (d - 1))
+		if alpha < 0.01 {
+			alpha = 0.01
+		} else if alpha > 1 {
+			alpha = 1
+		}
+		frama[i] = alpha*c[i] + (1-alpha)*frama[i-1]
+	}
+	last := n - 1
+	if c[last] > frama[last] {
+		return "Buy"
+	}
+	return "Sell"
+}
+
+// rsSignal returns Buy if ticker outperformed Nifty since the start of the window.
+func rsSignal(tickerCloses, niftyCloses []float64) string {
+	if len(tickerCloses) < 2 || len(niftyCloses) < 2 {
+		return "-"
+	}
+	n := len(tickerCloses)
+	nn := len(niftyCloses)
+	// align: use last min(n,nn) bars
+	tStart := tickerCloses[n-min(n, nn)]
+	nStart := niftyCloses[nn-min(n, nn)]
+	if tStart == 0 || nStart == 0 {
+		return "-"
+	}
+	tReturn := tickerCloses[n-1] / tStart
+	nReturn := niftyCloses[nn-1] / nStart
+	if nReturn == 0 {
+		return "-"
+	}
+	if tReturn/nReturn > 1.0 {
+		return "Buy"
+	}
+	return "Sell"
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// rsiSigLevel converts raw RSI value to multi-level signal.
+func rsiSigLevel(rsi float64) string {
+	switch {
+	case rsi > 80:
+		return "Buy++"
+	case rsi > 70:
+		return "Buy+"
+	case rsi > 60:
+		return "Buy"
+	case rsi < 20:
+		return "Sell++"
+	case rsi < 30:
+		return "Sell+"
+	case rsi < 40:
+		return "Sell"
+	}
+	return "Neutral"
+}
+
+// adxSigLevel computes proper ADX with DI+/DI- and returns multi-level signal.
+func adxSigLevel(h, l, c []float64, period int) string {
+	n := len(c)
+	if n < period+2 {
+		return "Neutral"
+	}
+	dmPlus := make([]float64, n)
+	dmMinus := make([]float64, n)
+	tr := make([]float64, n)
+	tr[0] = h[0] - l[0]
+	for i := 1; i < n; i++ {
+		upMove := h[i] - h[i-1]
+		downMove := l[i-1] - l[i]
+		if upMove > downMove && upMove > 0 {
+			dmPlus[i] = upMove
+		}
+		if downMove > upMove && downMove > 0 {
+			dmMinus[i] = downMove
+		}
+		tr[i] = math.Max(h[i]-l[i], math.Max(math.Abs(h[i]-c[i-1]), math.Abs(l[i]-c[i-1])))
+	}
+	smoothTR := make([]float64, n)
+	smoothPlus := make([]float64, n)
+	smoothMinus := make([]float64, n)
+	sum, sp, sm := 0.0, 0.0, 0.0
+	for i := 0; i < period; i++ {
+		sum += tr[i]
+		sp += dmPlus[i]
+		sm += dmMinus[i]
+	}
+	smoothTR[period-1] = sum
+	smoothPlus[period-1] = sp
+	smoothMinus[period-1] = sm
+	for i := period; i < n; i++ {
+		smoothTR[i] = smoothTR[i-1] - smoothTR[i-1]/float64(period) + tr[i]
+		smoothPlus[i] = smoothPlus[i-1] - smoothPlus[i-1]/float64(period) + dmPlus[i]
+		smoothMinus[i] = smoothMinus[i-1] - smoothMinus[i-1]/float64(period) + dmMinus[i]
+	}
+	adxArr := make([]float64, n)
+	var adxSum float64
+	var adxCount int
+	for i := period; i < n; i++ {
+		diPlus, diMinus := 0.0, 0.0
+		if smoothTR[i] > 0 {
+			diPlus = 100 * smoothPlus[i] / smoothTR[i]
+			diMinus = 100 * smoothMinus[i] / smoothTR[i]
+		}
+		dx := 0.0
+		if diPlus+diMinus > 0 {
+			dx = 100 * math.Abs(diPlus-diMinus) / (diPlus + diMinus)
+		}
+		adxSum += dx
+		adxCount++
+		if adxCount >= period {
+			adxArr[i] = adxSum / float64(period)
+			adxSum -= adxArr[i-period+1]
+		}
+	}
+	last := n - 1
+	diPlus, diMinus := 0.0, 0.0
+	if smoothTR[last] > 0 {
+		diPlus = 100 * smoothPlus[last] / smoothTR[last]
+		diMinus = 100 * smoothMinus[last] / smoothTR[last]
+	}
+	adxVal := adxArr[last]
+	base := "Buy"
+	if diMinus > diPlus {
+		base = "Sell"
+	}
+	switch {
+	case adxVal > 40:
+		return base + "+++"
+	case adxVal > 30:
+		return base + "++"
+	case adxVal > 25:
+		return base + "+"
+	}
+	return base
+}
+
 // ─── Main Signal Computation ───────────────────────────────────────────────────
 
 // ComputeSignals calculates all indicator signals for a slice of OHLCV bars.
-func ComputeSignals(bars []models.OHLCV) (models.TickerRow, error) {
+// niftyBars is optional (pass nil to skip RS computation).
+func ComputeSignals(bars []models.OHLCV, niftyBars []models.OHLCV) (models.TickerRow, error) {
 	if len(bars) < 50 {
 		return models.TickerRow{}, fmt.Errorf("insufficient bars: %d", len(bars))
 	}
@@ -253,7 +499,7 @@ func ComputeSignals(bars []models.OHLCV) (models.TickerRow, error) {
 		macdSig = "Sell"
 	}
 
-	// VWAP
+	// VWAP (session)
 	sumCV, sumV := 0.0, 0.0
 	for i := range bars {
 		sumCV += c[i] * v[i]
@@ -272,23 +518,15 @@ func ComputeSignals(bars []models.OHLCV) (models.TickerRow, error) {
 	st142 := supertrendDir(bars, 14, 2.0)
 	st103 := supertrendDir(bars, 10, 3.0)
 
-	// ADX simplified
-	adxSig := "Neutral"
-	at := atr(h, l, c, 14)
-	if at[last] > 0 {
-		if c[last] > c[last-1] {
-			adxSig = "Buy"
-		} else {
-			adxSig = "Sell"
-		}
-	}
+	adxSig := adxSigLevel(h, l, c, 14)
+	rsiSig := rsiSigLevel(rsi)
+	alligSig := alligatorSignal(bars)
+	framaSig := framaSignal(c)
 
-	// RSI signal
-	rsiSig := "Neutral"
-	if rsi > 60 {
-		rsiSig = "Buy"
-	} else if rsi < 40 {
-		rsiSig = "Sell"
+	// Relative Strength vs Nifty
+	rsSig := "-"
+	if len(niftyBars) >= 2 {
+		rsSig = rsSignal(c, closes(niftyBars))
 	}
 
 	// Volume
@@ -302,24 +540,21 @@ func ComputeSignals(bars []models.OHLCV) (models.TickerRow, error) {
 		volSig = "High Vol"
 	}
 
-	sigs := []string{vwapSig, st211, st142, st103, adxSig, rsiSig, macdSig, emaCross}
+	// Status: count Buy/Sell across all 10 signals
+	allSigs := []string{vwapSig, alligSig, st211, st142, st103, adxSig, rsiSig, macdSig, framaSig, emaCross, rsSig}
 	buyCount, sellCount := 0, 0
-	for _, s := range sigs {
-		if s == "Buy" {
+	for _, s := range allSigs {
+		if len(s) >= 3 && s[:3] == "Buy" {
 			buyCount++
-		} else if s == "Sell" {
+		} else if len(s) >= 4 && s[:4] == "Sell" {
 			sellCount++
 		}
 	}
 	status := "Neutral"
 	switch {
-	case buyCount >= 8:
+	case buyCount >= sellCount && buyCount >= 5:
 		status = fmt.Sprintf("Buy [%d]", buyCount)
-	case buyCount >= 5:
-		status = fmt.Sprintf("Buy [%d]", buyCount)
-	case sellCount >= 8:
-		status = fmt.Sprintf("Sell [%d]", sellCount)
-	case sellCount >= 5:
+	case sellCount > buyCount && sellCount >= 5:
 		status = fmt.Sprintf("Sell [%d]", sellCount)
 	}
 
@@ -332,6 +567,7 @@ func ComputeSignals(bars []models.OHLCV) (models.TickerRow, error) {
 		LTP: c[last], Chng: chng, Status: status,
 		RSI: rsiSig, MACD: macdSig, EMACross: emaCross,
 		VWAP: vwapSig, ST211: st211, ST142: st142, ST103: st103,
-		ADX: adxSig, Volume: volSig, Alligator: "Neutral",
+		ADX: adxSig, Volume: volSig, Alligator: alligSig,
+		FRAMA: framaSig, RS: rsSig,
 	}, nil
 }

@@ -36,8 +36,9 @@ const COLUMNS = [
     { key: 'ADX', label: 'ADX' },
     { key: 'RSI', label: 'RSI' },
     { key: 'MACD', label: 'MACD' },
-    { key: 'EMACross', label: 'EMA Cross' },
+    { key: 'FRAMA', label: 'FRAMA' },
     { key: 'Vol', label: 'Vol' },
+    { key: 'RS', label: 'RS' },
 ];
 
 const TraderViewTable = ({ data, interval }) => {
