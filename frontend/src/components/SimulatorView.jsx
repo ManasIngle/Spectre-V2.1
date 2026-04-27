@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import JournalView from './JournalView';
+import { useAuth } from '../AuthContext';
 
 const API = '';
 
@@ -24,6 +25,7 @@ const ReasonBadge = ({ reason }) => {
 };
 
 const SimulatorView = () => {
+    const { isAdmin } = useAuth();
     const [state, setState] = useState({ open: [], closed: [] });
     const [scorecard, setScorecard] = useState([]);
     const [scorecardDays, setScorecardDays] = useState(7);
@@ -88,7 +90,7 @@ const SimulatorView = () => {
                             <option value={30}>Last 30 days</option>
                         </select>
                     )}
-                    {tab !== 'journal' && (
+                    {tab !== 'journal' && isAdmin && (
                         <a
                             href={`/api/simulator/${tab === 'positions' ? 'executed' : 'scorecard'}/download`}
                             className="nav-tab"

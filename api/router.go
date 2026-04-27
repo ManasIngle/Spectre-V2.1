@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"spectre/api/handlers"
+	"spectre/services"
 )
 
 func guardReset(c *gin.Context) {
@@ -19,40 +20,92 @@ func guardReset(c *gin.Context) {
 	c.Next()
 }
 
+// requireAuth aborts with 401 unless the request has a valid session cookie.
+// Stores the session in the gin context as "session" for downstream handlers.
+func requireAuth(c *gin.Context) {
+	token, err := c.Cookie(services.CookieName())
+	if err != nil || token == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		c.Abort()
+		return
+	}
+	sess, err := services.ValidateSessionToken(token)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		c.Abort()
+		return
+	}
+	c.Set("session", sess)
+	c.Next()
+}
+
+// requireAdmin = requireAuth + role=admin
+func requireAdmin(c *gin.Context) {
+	v, exists := c.Get("session")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		c.Abort()
+		return
+	}
+	sess := v.(*services.Session)
+	if sess.Role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+		c.Abort()
+		return
+	}
+	c.Next()
+}
+
 func NewRouter() *gin.Engine {
 	r := gin.Default()
 
 	api := r.Group("/api")
-	{
-		api.GET("/health", handlers.GetHealth)
-		api.GET("/dashboard", handlers.GetDashboard)
-		api.GET("/market-direction", handlers.GetMarketDirection)
-		api.GET("/oi-chain", handlers.GetOIChain)
-		api.GET("/oi-trend", handlers.GetOITrend)
-		api.GET("/trade-signals", handlers.GetTradeSignals)
-		api.GET("/morning-signal", handlers.GetMorningSignal)
-		api.POST("/morning-signal/refresh", handlers.RefreshMorningSignalHandler)
-		api.GET("/institutional-outlook", handlers.GetInstitutionalOutlook)
-		api.GET("/stability-state", handlers.GetStabilityState)
-		api.POST("/stability-reset", guardReset, handlers.ResetStability)
-		api.GET("/ml-logs", handlers.GetMLLogs)
-		api.GET("/ml-logs/download", handlers.DownloadMLLogs)
-		api.GET("/scalper-signal", handlers.GetScalperSignal)
-		api.GET("/news", handlers.GetNews)
-		api.GET("/heatmap", handlers.GetHeatmap)
-		api.GET("/overnight-prediction", handlers.GetOvernightPrediction)
-		api.GET("/overnight-log", handlers.GetOvernightLog)
-		api.GET("/option-array/today", handlers.GetOptionArrayToday)
-		api.GET("/option-array/download", handlers.DownloadOptionArray)
 
-		// Simulator Mode (sandboxed): shadow trades + per-model scorecard
-		api.GET("/simulator/state", handlers.GetSimulatorState)
-		api.GET("/simulator/scorecard", handlers.GetModelScorecard)
-		api.GET("/simulator/executed/download", handlers.DownloadExecutedTrades)
-		api.GET("/simulator/grades/download", handlers.DownloadSignalGrades)
-		api.GET("/simulator/scorecard/download", handlers.DownloadModelScorecard)
-		api.GET("/simulator/journal", handlers.GetJournalList)
-		api.GET("/simulator/journal/detail", handlers.GetJournalDetail)
+	// ─── Public routes (no auth required) ──────────────────────────────────
+	api.GET("/health", handlers.GetHealth)
+	api.POST("/auth/login", handlers.Login)
+	api.POST("/auth/logout", handlers.Logout)
+	api.GET("/auth/me", handlers.Me)
+
+	// ─── Authenticated routes (any logged-in user) ────────────────────────
+	authed := api.Group("")
+	authed.Use(requireAuth)
+	{
+		authed.GET("/dashboard", handlers.GetDashboard)
+		authed.GET("/market-direction", handlers.GetMarketDirection)
+		authed.GET("/oi-chain", handlers.GetOIChain)
+		authed.GET("/oi-trend", handlers.GetOITrend)
+		authed.GET("/trade-signals", handlers.GetTradeSignals)
+		authed.GET("/morning-signal", handlers.GetMorningSignal)
+		authed.POST("/morning-signal/refresh", handlers.RefreshMorningSignalHandler)
+		authed.GET("/institutional-outlook", handlers.GetInstitutionalOutlook)
+		authed.GET("/stability-state", handlers.GetStabilityState)
+		authed.GET("/scalper-signal", handlers.GetScalperSignal)
+		authed.GET("/news", handlers.GetNews)
+		authed.GET("/heatmap", handlers.GetHeatmap)
+		authed.GET("/overnight-prediction", handlers.GetOvernightPrediction)
+		authed.GET("/overnight-log", handlers.GetOvernightLog)
+		authed.GET("/option-array/today", handlers.GetOptionArrayToday)
+		authed.GET("/simulator/state", handlers.GetSimulatorState)
+		authed.GET("/simulator/scorecard", handlers.GetModelScorecard)
+		authed.GET("/simulator/journal", handlers.GetJournalList)
+		authed.GET("/simulator/journal/detail", handlers.GetJournalDetail)
+	}
+
+	// ─── Admin-only routes (CSV downloads, logs, user management) ─────────
+	admin := api.Group("")
+	admin.Use(requireAuth, requireAdmin)
+	{
+		admin.GET("/ml-logs", handlers.GetMLLogs)
+		admin.GET("/ml-logs/download", handlers.DownloadMLLogs)
+		admin.GET("/option-array/download", handlers.DownloadOptionArray)
+		admin.GET("/simulator/executed/download", handlers.DownloadExecutedTrades)
+		admin.GET("/simulator/grades/download", handlers.DownloadSignalGrades)
+		admin.GET("/simulator/scorecard/download", handlers.DownloadModelScorecard)
+		admin.POST("/stability-reset", guardReset, handlers.ResetStability)
+		admin.GET("/auth/users", handlers.ListUsers)
+		admin.POST("/auth/users", handlers.CreateUser)
+		admin.DELETE("/auth/users/:username", handlers.DeleteUser)
 	}
 
 	return r

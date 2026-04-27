@@ -12,6 +12,12 @@ services:
       - RESET_KEY=spectre-reset-2024
       # Persistent CSV storage — survives container rebuilds.
       - SPECTRE_DATA_DIR=/app/data
+      # Auth — set in Dokploy. SESSION_SECRET should be a random 32+ byte hex string.
+      # BOOTSTRAP_ADMIN_USER + BOOTSTRAP_ADMIN_PASSWORD only used on first startup
+      # if data/users.json doesn't exist — remove from Dokploy after first login.
+      - SESSION_SECRET=${SESSION_SECRET}
+      - BOOTSTRAP_ADMIN_USER=${BOOTSTRAP_ADMIN_USER:-admin}
+      - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD}
     volumes:
       # Named volume — managed by Docker, independent of git checkout.
       # Survives Dokploy redeploys, repo re-clones, and `docker compose down`.
