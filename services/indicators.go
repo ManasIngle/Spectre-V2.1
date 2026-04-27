@@ -329,7 +329,7 @@ func ComputeSignals(bars []models.OHLCV) (models.TickerRow, error) {
 	}
 
 	return models.TickerRow{
-		LTP: c[last], Change: chng, Status: status,
+		LTP: c[last], Chng: chng, Status: status,
 		RSI: rsiSig, MACD: macdSig, EMACross: emaCross,
 		VWAP: vwapSig, ST211: st211, ST142: st142, ST103: st103,
 		ADX: adxSig, Volume: volSig, Alligator: "Neutral",

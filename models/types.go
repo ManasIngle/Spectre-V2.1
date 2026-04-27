@@ -164,20 +164,20 @@ type HeatmapItem struct {
 }
 
 type TickerRow struct {
-	Script    string  `json:"script"`
-	Status    string  `json:"status"`
-	LTP       float64 `json:"ltp"`
-	Change    float64 `json:"changePercent"`
-	RSI       string  `json:"rsi"`
-	MACD      string  `json:"macd"`
-	EMACross  string  `json:"ema_cross"`
-	VWAP      string  `json:"vwap"`
-	ST211     string  `json:"st211"`
-	ST142     string  `json:"st142"`
-	ST103     string  `json:"st103"`
-	Alligator string  `json:"alligator"`
-	ADX       string  `json:"adx"`
-	Volume    string  `json:"volume"`
+	Script    string  `json:"Script"`
+	Status    string  `json:"Status"`
+	LTP       float64 `json:"LTP"`
+	Chng      float64 `json:"Chng"`
+	RSI       string  `json:"RSI"`
+	MACD      string  `json:"MACD"`
+	EMACross  string  `json:"EMACross"`
+	VWAP      string  `json:"VWAP"`
+	ST211     string  `json:"ST211"`
+	ST142     string  `json:"ST142"`
+	ST103     string  `json:"ST103"`
+	Alligator string  `json:"Alligator"`
+	ADX       string  `json:"ADX"`
+	Volume    string  `json:"Vol"`
 }
 
 type MorningSignal struct {

@@ -1,14 +1,15 @@
 package handlers
 
 import (
-"net/http"
-"sync"
+	"fmt"
+	"net/http"
+	"sync"
 
-"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin"
 
-"spectre/config"
-"spectre/models"
-"spectre/services"
+	"spectre/config"
+	"spectre/models"
+	"spectre/services"
 )
 
 // GetDashboard returns indicator signals for the trader watchlist.
@@ -35,8 +36,12 @@ interval := c.DefaultQuery("interval", "3m")
 		go func(ticker string) {
 			defer wg.Done()
 			bars, err := services.FetchOHLCV(ticker, interval, rangeVal, config.CacheTTLFast)
-			if err != nil || len(bars) < 50 {
+			if err != nil {
 				ch <- result{ticker: ticker, err: err}
+				return
+			}
+			if len(bars) < 50 {
+				ch <- result{ticker: ticker, err: fmt.Errorf("insufficient bars: %d", len(bars))}
 				return
 			}
 			row, err := services.ComputeSignals(bars)

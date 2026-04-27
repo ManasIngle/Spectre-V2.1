@@ -30,22 +30,21 @@ const getStatusClass = (status) => {
 const COLUMNS = [
     { key: 'VWAP', label: 'VWAP' },
     { key: 'Alligator', label: 'Alligator' },
-    { key: 'ST 21-1', label: 'ST 21-1' },
-    { key: 'ST 14-2', label: 'ST 14-2' },
-    { key: 'ST 10-3', label: 'ST 10-3' },
+    { key: 'ST211', label: 'ST 21-1' },
+    { key: 'ST142', label: 'ST 14-2' },
+    { key: 'ST103', label: 'ST 10-3' },
     { key: 'ADX', label: 'ADX' },
     { key: 'RSI', label: 'RSI' },
     { key: 'MACD', label: 'MACD' },
-    { key: 'FRAMA', label: 'FRAMA' },
+    { key: 'EMACross', label: 'EMA Cross' },
     { key: 'Vol', label: 'Vol' },
-    { key: 'RS', label: 'RS' },
 ];
 
 const TraderViewTable = ({ data, interval }) => {
     if (!data || data.length === 0) {
         return (
             <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '3rem' }}>
-                No market data available. Waiting for backend...
+                No data — market may be closed or data source unavailable.
             </div>
         );
     }
@@ -76,12 +75,12 @@ const TraderViewTable = ({ data, interval }) => {
                                 </span>
                             </td>
                             {/* Script Name */}
-                            <td className="script-name">{row.Script}</td>
+                            <td className="script-name">{row.Script || '—'}</td>
                             {/* LTP */}
-                            <td className="ltp-cell">{row.LTP}</td>
+                            <td className="ltp-cell">{row.LTP ? row.LTP.toFixed(2) : '—'}</td>
                             {/* Change */}
-                            <td className={row.Chng >= 0 ? 'val-positive' : 'val-negative'}>
-                                {row.Chng > 0 ? '+' : ''}{row.Chng}
+                            <td className={(row.Chng ?? 0) >= 0 ? 'val-positive' : 'val-negative'}>
+                                {row.Chng != null ? `${row.Chng > 0 ? '+' : ''}${row.Chng.toFixed(2)}` : '—'}
                             </td>
                             {/* Indicator Columns */}
                             {COLUMNS.map(col => (
