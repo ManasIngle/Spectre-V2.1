@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import JournalView from './JournalView';
 
 const API = '';
 
@@ -67,6 +68,10 @@ const SimulatorView = () => {
                         onClick={() => setTab('positions')}
                     >Positions</button>
                     <button
+                        className={`nav-tab${tab === 'journal' ? ' active' : ''}`}
+                        onClick={() => setTab('journal')}
+                    >Journal</button>
+                    <button
                         className={`nav-tab${tab === 'scorecard' ? ' active' : ''}`}
                         onClick={() => setTab('scorecard')}
                     >Model Scorecard</button>
@@ -83,11 +88,13 @@ const SimulatorView = () => {
                             <option value={30}>Last 30 days</option>
                         </select>
                     )}
-                    <a
-                        href={`/api/simulator/${tab === 'positions' ? 'executed' : 'scorecard'}/download`}
-                        className="nav-tab"
-                        style={{ textDecoration: 'none' }}
-                    >Download CSV</a>
+                    {tab !== 'journal' && (
+                        <a
+                            href={`/api/simulator/${tab === 'positions' ? 'executed' : 'scorecard'}/download`}
+                            className="nav-tab"
+                            style={{ textDecoration: 'none' }}
+                        >Download CSV</a>
+                    )}
                 </div>
             </div>
 
@@ -214,6 +221,8 @@ const SimulatorView = () => {
                     )}
                 </>
             )}
+
+            {tab === 'journal' && <JournalView />}
 
             {tab === 'scorecard' && (
                 <>

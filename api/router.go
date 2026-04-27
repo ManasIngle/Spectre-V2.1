@@ -51,6 +51,8 @@ func NewRouter() *gin.Engine {
 		api.GET("/simulator/executed/download", handlers.DownloadExecutedTrades)
 		api.GET("/simulator/grades/download", handlers.DownloadSignalGrades)
 		api.GET("/simulator/scorecard/download", handlers.DownloadModelScorecard)
+		api.GET("/simulator/journal", handlers.GetJournalList)
+		api.GET("/simulator/journal/detail", handlers.GetJournalDetail)
 	}
 
 	return r
