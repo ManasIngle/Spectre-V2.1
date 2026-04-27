@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -21,15 +22,100 @@ func GetMLLogs(c *gin.Context) {
 	if err != nil {
 		ist = time.FixedZone("IST", 5*3600+1800)
 	}
-	today := time.Now().In(ist).Format("2006-01-02")
 
-	logs, err := readCSVLogs(today)
+	// Date selection: explicit ?date=YYYY-MM-DD wins. Otherwise default to today
+	// in IST, with auto-fallback to the most recent date that has data.
+	requested := c.Query("date")
+	autoFallback := requested == ""
+	if requested == "" {
+		requested = time.Now().In(ist).Format("2006-01-02")
+	}
+
+	logs, err := readCSVLogs(requested)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"logs": []interface{}{}})
+		c.JSON(http.StatusOK, gin.H{"logs": []interface{}{}, "date": requested, "available_dates": []string{}})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"logs": logs})
+	servedDate := requested
+	fellBack := false
+
+	// Auto-fallback: if no rows for today AND user didn't explicitly pick a date,
+	// serve the most recent day that does have data so the UI is never confusingly empty.
+	if len(logs) == 0 && autoFallback {
+		dates, _ := availableDates()
+		for _, d := range dates {
+			if d >= requested {
+				continue // skip future dates (shouldn't happen, defensive)
+			}
+			candidate, err := readCSVLogs(d)
+			if err == nil && len(candidate) > 0 {
+				logs = candidate
+				servedDate = d
+				fellBack = true
+				break
+			}
+		}
+	}
+
+	dates, _ := availableDates()
+	c.JSON(http.StatusOK, gin.H{
+		"logs":            logs,
+		"date":            servedDate,
+		"requested_date":  requested,
+		"fell_back":       fellBack,
+		"available_dates": dates,
+	})
+}
+
+// availableDates returns the distinct Date values in system_signals.csv,
+// most-recent first.
+func availableDates() ([]string, error) {
+	f, err := os.Open(signalCSV())
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	r.FieldsPerRecord = -1
+	headers, err := r.Read()
+	if err != nil {
+		return nil, err
+	}
+	idx := make(map[string]int, len(headers))
+	for i, h := range headers {
+		idx[h] = i
+	}
+
+	seen := map[string]struct{}{}
+	for {
+		row, err := r.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		dateVal := colVal(row, idx, "Date")
+		if dateVal == "" {
+			ts := colVal(row, idx, "Timestamp")
+			if len(ts) >= 10 {
+				dateVal = ts[:10]
+			}
+		}
+		if dateVal != "" {
+			seen[dateVal] = struct{}{}
+		}
+	}
+
+	out := make([]string, 0, len(seen))
+	for d := range seen {
+		out = append(out, d)
+	}
+	// Newest first
+	sort.Sort(sort.Reverse(sort.StringSlice(out)))
+	return out, nil
 }
 
 func DownloadMLLogs(c *gin.Context) {
