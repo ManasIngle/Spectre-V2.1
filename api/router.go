@@ -42,6 +42,8 @@ func NewRouter() *gin.Engine {
 		api.GET("/heatmap", handlers.GetHeatmap)
 		api.GET("/overnight-prediction", handlers.GetOvernightPrediction)
 		api.GET("/overnight-log", handlers.GetOvernightLog)
+		api.GET("/option-array/today", handlers.GetOptionArrayToday)
+		api.GET("/option-array/download", handlers.DownloadOptionArray)
 	}
 
 	return r

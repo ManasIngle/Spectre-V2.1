@@ -1,0 +1,6 @@
+# Runtime CSVs — persisted via Docker bind mount, not committed
+*.csv
+*.csv.migrate.tmp
+
+# Keep the directory itself tracked
+!.gitignore

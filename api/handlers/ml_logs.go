@@ -9,9 +9,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"spectre/services"
 )
 
-const signalCSVPath = "system_signals.csv"
+// signalCSV resolves the system_signals.csv path each call so the
+// SPECTRE_DATA_DIR env var (set in Docker) is honored.
+func signalCSV() string { return services.DataPath("system_signals.csv") }
 
 func GetMLLogs(c *gin.Context) {
 	ist, err := time.LoadLocation("Asia/Kolkata")
@@ -30,7 +33,7 @@ func GetMLLogs(c *gin.Context) {
 }
 
 func DownloadMLLogs(c *gin.Context) {
-	abs, err := filepath.Abs(signalCSVPath)
+	abs, err := filepath.Abs(signalCSV())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "path error"})
 		return
@@ -41,7 +44,7 @@ func DownloadMLLogs(c *gin.Context) {
 }
 
 func readCSVLogs(datePrefix string) ([]map[string]string, error) {
-	f, err := os.Open(signalCSVPath)
+	f, err := os.Open(signalCSV())
 	if err != nil {
 		return nil, err
 	}

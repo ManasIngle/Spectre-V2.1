@@ -10,6 +10,10 @@ services:
       - GIN_MODE=release
       - TZ=Asia/Kolkata
       - RESET_KEY=spectre-reset-2024
+      # Persistent CSV storage — survives container rebuilds.
+      - SPECTRE_DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
     depends_on:
       ml-sidecar:
         condition: service_healthy

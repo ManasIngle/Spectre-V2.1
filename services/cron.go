@@ -10,7 +10,11 @@ import (
 	"spectre/models"
 )
 
-const signalCSVFile = "system_signals.csv"
+const signalCSVName = "system_signals.csv"
+
+// signalCSVPath resolves the CSV location at call time so SPECTRE_DATA_DIR
+// can take effect even if set after package init.
+func signalCSVPath() string { return DataPath(signalCSVName) }
 
 func StartSystemCron() {
 	go func() {
@@ -51,6 +55,11 @@ func StartSystemCron() {
 				}
 
 				logSignalToCSV(now, signal)
+
+				// Track suggested strikes + log per-minute option prices for analytics.
+				TrackSignalIfNew(now, signal)
+				oi, _ := FetchOIChain()
+				LogOptionArraySnapshot(now, oi, signal.NiftySpot)
 			}
 		}
 	}()
@@ -59,7 +68,7 @@ func StartSystemCron() {
 // migrateSignalCSV splices Scalper_* columns into an existing CSV that predates them.
 // Inserted directly before "PCR" to match the new header order; old rows get "" padding.
 func migrateSignalCSV() error {
-	f, err := os.Open(signalCSVFile)
+	f, err := os.Open(signalCSVPath())
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -105,7 +114,7 @@ func migrateSignalCSV() error {
 		rows[i] = splice(rows[i], pad)
 	}
 
-	tmp := signalCSVFile + ".migrate.tmp"
+	tmp := signalCSVPath() + ".migrate.tmp"
 	out, err := os.Create(tmp)
 	if err != nil {
 		return err
@@ -121,15 +130,15 @@ func migrateSignalCSV() error {
 		os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, signalCSVFile); err != nil {
+	if err := os.Rename(tmp, signalCSVPath()); err != nil {
 		return err
 	}
-	log.Printf("Migrated %s: inserted Scalper_* columns for %d existing rows", signalCSVFile, len(rows)-1)
+	log.Printf("Migrated %s: inserted Scalper_* columns for %d existing rows", signalCSVPath(), len(rows)-1)
 	return nil
 }
 
 func logSignalToCSV(t time.Time, s *models.TradeSignal) {
-	file, err := os.OpenFile(signalCSVFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(signalCSVPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Printf("Failed to open csv: %v", err)
 		return

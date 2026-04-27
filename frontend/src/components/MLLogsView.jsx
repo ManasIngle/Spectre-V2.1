@@ -28,19 +28,6 @@ const MLLogsView = () => {
 
   return (
     <div className="table-container fade-in" style={{ position: 'relative' }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
-            <button 
-                onClick={() => window.open('/api/ml-logs/download', '_blank')}
-                style={{
-                  padding: '8px 16px',
-                  background: 'linear-gradient(45deg, #0d6efd, #0dcaf0)',
-                  color: 'white', border: 'none', borderRadius: '4px',
-                  cursor: 'pointer', fontWeight: 'bold'
-                }}
-            >
-                📥 Download Full CSV
-            </button>
-        </div>
       <table className="nifty-table glass">
         <thead>
           <tr>
