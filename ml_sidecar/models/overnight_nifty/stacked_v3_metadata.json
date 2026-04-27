@@ -1,8 +1,8 @@
 {
   "model_name": "overnight_nifty_stacked_v3",
   "version": "v3",
-  "trained_at": "2026-04-25T07:32:22.515883Z",
-  "n_features": 74,
+  "trained_at": "2026-04-27T19:35:18.157038Z",
+  "n_features": 90,
   "feature_columns": [
     "nifty_ret_1",
     "nifty_ret_5",
@@ -49,6 +49,18 @@
     "kospi_ret_1",
     "kospi_ret_5",
     "kospi_ret_20",
+    "infy_adr_ret_1",
+    "infy_adr_ret_5",
+    "infy_adr_ret_20",
+    "hdb_adr_ret_1",
+    "hdb_adr_ret_5",
+    "hdb_adr_ret_20",
+    "ibn_adr_ret_1",
+    "ibn_adr_ret_5",
+    "ibn_adr_ret_20",
+    "wit_adr_ret_1",
+    "wit_adr_ret_5",
+    "wit_adr_ret_20",
     "move_ret_1",
     "move_ret_5",
     "move_ret_20",
@@ -77,7 +89,11 @@
     "vix_regime_high",
     "nifty_rv_vs_vix",
     "inr_nifty_divergence",
-    "nifty_up_freq_20"
+    "nifty_up_freq_20",
+    "adr_bull_count",
+    "adr_avg_ret_1",
+    "adr_vs_sp500",
+    "adr_heavy_avg_ret"
   ],
   "dir_labels": [
     "DOWN",
@@ -95,111 +111,111 @@
       "fold": 1,
       "test_window": "2021-01-01\u21922021-12-31",
       "test_n": 169,
-      "xgb_acc": 50.3,
-      "xgb_dir_only": 52.45,
-      "lgb_acc": 49.7,
-      "lgb_dir_only": 51.75
+      "xgb_acc": 58.58,
+      "xgb_dir_only": 60.87,
+      "lgb_acc": 57.4,
+      "lgb_dir_only": 60.0
     },
     {
       "fold": 2,
       "test_window": "2022-01-01\u21922022-12-31",
       "test_n": 228,
-      "xgb_acc": 56.14,
-      "xgb_dir_only": 59.9,
-      "lgb_acc": 56.58,
-      "lgb_dir_only": 59.9
+      "xgb_acc": 60.96,
+      "xgb_dir_only": 63.5,
+      "lgb_acc": 61.4,
+      "lgb_dir_only": 63.59
     },
     {
       "fold": 3,
       "test_window": "2023-01-01\u21922023-12-31",
       "test_n": 205,
-      "xgb_acc": 46.83,
-      "xgb_dir_only": 49.64,
-      "lgb_acc": 46.34,
-      "lgb_dir_only": 50.0
+      "xgb_acc": 51.22,
+      "xgb_dir_only": 56.06,
+      "lgb_acc": 52.68,
+      "lgb_dir_only": 57.14
     },
     {
       "fold": 4,
       "test_window": "2024-01-01\u21922024-12-31",
       "test_n": 184,
-      "xgb_acc": 44.57,
-      "xgb_dir_only": 45.83,
-      "lgb_acc": 47.83,
-      "lgb_dir_only": 50.0
+      "xgb_acc": 51.63,
+      "xgb_dir_only": 52.71,
+      "lgb_acc": 54.35,
+      "lgb_dir_only": 54.26
     },
     {
       "fold": 5,
       "test_window": "2025-01-01\u21922025-12-31",
       "test_n": 249,
-      "xgb_acc": 48.19,
-      "xgb_dir_only": 50.0,
-      "lgb_acc": 47.39,
-      "lgb_dir_only": 48.88
+      "xgb_acc": 57.43,
+      "xgb_dir_only": 64.38,
+      "lgb_acc": 55.82,
+      "lgb_dir_only": 63.03
     }
   ],
   "walk_forward_stacked": {
     "uncalibrated": {
-      "acc_3class": 49.57,
-      "dir_only": 53.16
+      "acc_3class": 56.81,
+      "dir_only": 61.41
     },
     "calibrated": {
-      "acc_3class": 50.24,
-      "dir_only": 52.83
+      "acc_3class": 58.16,
+      "dir_only": 62.16
     },
     "conviction": [
       {
         "threshold": 0.0,
-        "trades": 778,
-        "freq_pct": 75.2,
-        "dir_acc_pct": 52.8
+        "trades": 761,
+        "freq_pct": 73.5,
+        "dir_acc_pct": 62.2
       },
       {
         "threshold": 0.4,
-        "trades": 701,
-        "freq_pct": 67.7,
-        "dir_acc_pct": 54.4
+        "trades": 700,
+        "freq_pct": 67.6,
+        "dir_acc_pct": 63.4
       },
       {
         "threshold": 0.45,
-        "trades": 476,
-        "freq_pct": 46.0,
-        "dir_acc_pct": 60.1
+        "trades": 626,
+        "freq_pct": 60.5,
+        "dir_acc_pct": 66.1
       },
       {
         "threshold": 0.5,
-        "trades": 263,
-        "freq_pct": 25.4,
-        "dir_acc_pct": 70.7
+        "trades": 547,
+        "freq_pct": 52.9,
+        "dir_acc_pct": 69.3
       },
       {
         "threshold": 0.55,
-        "trades": 233,
-        "freq_pct": 22.5,
-        "dir_acc_pct": 74.7
+        "trades": 480,
+        "freq_pct": 46.4,
+        "dir_acc_pct": 72.1
       },
       {
         "threshold": 0.6,
-        "trades": 187,
-        "freq_pct": 18.1,
-        "dir_acc_pct": 78.6
+        "trades": 376,
+        "freq_pct": 36.3,
+        "dir_acc_pct": 75.3
       },
       {
         "threshold": 0.65,
-        "trades": 167,
-        "freq_pct": 16.1,
-        "dir_acc_pct": 80.8
+        "trades": 327,
+        "freq_pct": 31.6,
+        "dir_acc_pct": 77.4
       },
       {
         "threshold": 0.7,
-        "trades": 143,
-        "freq_pct": 13.8,
-        "dir_acc_pct": 81.1
+        "trades": 286,
+        "freq_pct": 27.6,
+        "dir_acc_pct": 79.0
       }
     ]
   },
   "holdout": {
-    "acc_3class_pct": 73.33,
-    "dir_only_acc_pct": 78.57,
-    "n": 15
+    "acc_3class_pct": 87.5,
+    "dir_only_acc_pct": 85.71,
+    "n": 16
   }
 }

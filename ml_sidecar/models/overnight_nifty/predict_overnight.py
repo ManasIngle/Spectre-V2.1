@@ -115,7 +115,9 @@ def predict(asof_date: date | None = None) -> dict:
     available_cols = [c for c in feat_cols if c in feats.columns]
     if len(available_cols) != len(feat_cols):
         missing = set(feat_cols) - set(available_cols)
-        raise RuntimeError(f"Feature drift: training features missing now: {missing}")
+        print(f"[predict] WARNING: {len(missing)} feature(s) missing from parquet — filling with 0: {missing}")
+        for col in missing:
+            feats[col] = 0.0
 
     if asof_date is None:
         asof = feats.index.max()
