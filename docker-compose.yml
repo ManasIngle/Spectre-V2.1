@@ -13,7 +13,10 @@ services:
       # Persistent CSV storage — survives container rebuilds.
       - SPECTRE_DATA_DIR=/app/data
     volumes:
-      - ./data:/app/data
+      # Named volume — managed by Docker, independent of git checkout.
+      # Survives Dokploy redeploys, repo re-clones, and `docker compose down`.
+      # Backed up via Dokploy's "Volume Backups" tab.
+      - spectre_data:/app/data
     depends_on:
       ml-sidecar:
         condition: service_healthy
@@ -34,9 +37,11 @@ services:
     environment:
       - TZ=Asia/Kolkata
     volumes:
+      # Trained model artifacts — read-only, shipped with the repo.
       - ./ml_sidecar/models:/app/models:ro
-      # overnight model writes predictions log + refreshes raw parquet at runtime
-      - ./ml_sidecar/models/overnight_nifty/data:/app/models/overnight_nifty/data:rw
+      # Overnight model runtime data (predictions log + refreshed parquet).
+      # Named volume so daily predictions accumulate across deploys.
+      - overnight_data:/app/models/overnight_nifty/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8240/health')"]
       interval: 30s
@@ -54,3 +59,7 @@ services:
         condition: service_healthy
       ml-sidecar:
         condition: service_healthy
+
+volumes:
+  spectre_data:        # system_signals.csv, option_price_array.csv
+  overnight_data:      # overnight_predictions.csv, overnight_raw.parquet
