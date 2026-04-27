@@ -60,6 +60,16 @@ func StartSystemCron() {
 				TrackSignalIfNew(now, signal)
 				oi, _ := FetchOIChain()
 				LogOptionArraySnapshot(now, oi, signal.NiftySpot)
+
+				// Simulator Mode (sandboxed): shadow position tracking.
+				SimOnSignal(now, signal, oi)
+				SimTick(now, oi, signal.NiftySpot)
+			}
+
+			// Daily grader at 15:35 IST — runs after market close.
+			if timeStr == "15:35" {
+				log.Println("Signal grader trigger at", timeStr)
+				go GradeDay(now)
 			}
 		}
 	}()

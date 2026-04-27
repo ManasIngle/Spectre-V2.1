@@ -44,6 +44,13 @@ func NewRouter() *gin.Engine {
 		api.GET("/overnight-log", handlers.GetOvernightLog)
 		api.GET("/option-array/today", handlers.GetOptionArrayToday)
 		api.GET("/option-array/download", handlers.DownloadOptionArray)
+
+		// Simulator Mode (sandboxed): shadow trades + per-model scorecard
+		api.GET("/simulator/state", handlers.GetSimulatorState)
+		api.GET("/simulator/scorecard", handlers.GetModelScorecard)
+		api.GET("/simulator/executed/download", handlers.DownloadExecutedTrades)
+		api.GET("/simulator/grades/download", handlers.DownloadSignalGrades)
+		api.GET("/simulator/scorecard/download", handlers.DownloadModelScorecard)
 	}
 
 	return r
