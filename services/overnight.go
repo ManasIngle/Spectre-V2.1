@@ -105,10 +105,18 @@ func FetchOvernightLog(limit int) ([]OvernightLogEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("overnight log read: %w", err)
 	}
-	var rows []OvernightLogEntry
-	if err := json.Unmarshal(body, &rows); err != nil {
+	var wrapper struct {
+		Rows  []OvernightLogEntry `json:"rows"`
+		N     int                 `json:"n"`
+		Error string              `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(body, &wrapper); err != nil {
 		return nil, fmt.Errorf("overnight log parse: %v", err)
 	}
-	overnightCache.Set(key, rows, 5*time.Minute)
-	return rows, nil
+	if wrapper.Error != "" && len(wrapper.Rows) == 0 {
+		// Empty log file is not an error — return empty slice.
+		return []OvernightLogEntry{}, nil
+	}
+	overnightCache.Set(key, wrapper.Rows, 5*time.Minute)
+	return wrapper.Rows, nil
 }

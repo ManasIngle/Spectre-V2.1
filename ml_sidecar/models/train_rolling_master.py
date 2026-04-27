@@ -119,6 +119,11 @@ def train_model(df, feature_cols):
     weights[0] = max(weights[0] * 0.7, 0.5)  # DOWN: reduce weight → less false bearish
     sample_weights = np.array([weights[int(yi)] for yi in y_train])
 
+    # Purge Gap: prevent target leakage from the last training rows into the test set
+    purge = 30
+    X_train, y_train = X_train[:-purge], y_train[:-purge]
+    sample_weights = sample_weights[:-purge]
+
     print("\nInitiating RandomizedSearchCV Hyperparameter Tuning on Rolling Data...")
     base_model = XGBClassifier(random_state=42, n_jobs=-1, eval_metric='mlogloss', use_label_encoder=False)
     
@@ -142,7 +147,7 @@ def train_model(df, feature_cols):
     model = random_search.best_estimator_
     
     # Final Fit
-    model.fit(X_train, y_train, sample_weight=sample_weights, eval_set=[(X_test, y_test)], verbose=False)
+    model.fit(X_train, y_train, sample_weight=sample_weights, verbose=False)
     
     y_pred = model.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
