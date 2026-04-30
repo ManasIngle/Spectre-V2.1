@@ -43,11 +43,11 @@ services:
     environment:
       - TZ=Asia/Kolkata
     volumes:
-      # Trained model artifacts — read-only, shipped with the repo.
-      - ./ml_sidecar/models:/app/models:ro
-      # Overnight model runtime data (predictions log + refreshed parquet).
-      # Named volume so daily predictions accumulate across deploys.
-      - overnight_data:/app/models/overnight_nifty/data
+      # Named volume for ALL model artifacts + runtime data.
+      # On first deploy the entrypoint seeds from the baked-in /app/models_seed.
+      # On subsequent deploys the volume already has data — seed is skipped.
+      # Backed up via Dokploy's "Volume Backups" tab (weekly).
+      - ml_models:/app/models
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8240/health')"]
       interval: 30s
@@ -67,5 +67,5 @@ services:
         condition: service_healthy
 
 volumes:
-  spectre_data:        # system_signals.csv, option_price_array.csv
-  overnight_data:      # overnight_predictions.csv, overnight_raw.parquet
+  spectre_data:        # system_signals.csv, executed_trades.csv, users.json, etc.
+  ml_models:           # ALL ML model files (.pkl, .keras, .json) + overnight data
