@@ -58,7 +58,19 @@ def build_features(raw: pd.DataFrame) -> pd.DataFrame:
 
     # Forward-fill foreign markets: if NYSE was closed yesterday, last known
     # close is what we actually had to act on overnight.
-    foreign_cols = [c for c in df.columns if c.endswith("_close") and c != "nifty_close"]
+    # Explicitly exclude Indian sector indices — those are NSE same-day closes,
+    # processed separately below with a .shift(1) lag.
+    _DOMESTIC_PREFIXES = (
+        "nifty_bank", "nifty_it", "nifty_fin", "nifty_fmcg",
+        "nifty_auto", "nifty_energy", "nifty_health", "nifty_infra",
+        "nifty_500", "nifty_100",
+    )
+    foreign_cols = [
+        c for c in df.columns
+        if c.endswith("_close")
+        and c != "nifty_close"
+        and not any(c.startswith(p) for p in _DOMESTIC_PREFIXES)
+    ]
     df[foreign_cols] = df[foreign_cols].ffill()
 
     # ── Nifty derived (lagged by 1) ────────────────────────────────────────
@@ -144,6 +156,57 @@ def build_features(raw: pd.DataFrame) -> pd.DataFrame:
     # Trend strength on Nifty (ADX-like, simplified): rolling % of up days in last 20
     f["nifty_up_freq_20"] = (_safe_pct(nclose, 1).shift(1) > 0).rolling(20).mean()
 
+    # ── Indian sector breadth & momentum features ─────────────────────────
+    # Sector closes from local NSE dataset (2015-present). Lagged by 1 day —
+    # yesterday's sector closes are known before NSE opens at 09:15 IST.
+    #
+    # Breadth = fraction of sectors above their N-day MA. Mirrors the [E] BREADTH
+    # adjustment in the external system we reverse-engineered (positive beta ~0.025).
+    # Sector returns capture the heavyweight composition of Nifty 50:
+    #   Nifty Bank ~35%, Nifty IT ~15%, Nifty Fin Services ~15%.
+    KEY_SECTORS = ["nifty_bank", "nifty_it", "nifty_fin", "nifty_fmcg",
+                   "nifty_auto", "nifty_energy", "nifty_health", "nifty_infra",
+                   "nifty_500", "nifty_100"]
+    BREADTH_SECTORS = [f"{s}_close" for s in KEY_SECTORS if f"{s}_close" in df.columns]
+
+    if len(BREADTH_SECTORS) >= 3:
+        sector_df = df[BREADTH_SECTORS]
+        above_20 = pd.DataFrame(
+            {col: (sector_df[col] > sector_df[col].rolling(20).mean()).astype(float)
+             for col in BREADTH_SECTORS}
+        )
+        above_50 = pd.DataFrame(
+            {col: (sector_df[col] > sector_df[col].rolling(50).mean()).astype(float)
+             for col in BREADTH_SECTORS}
+        )
+        f["sector_breadth_20d"] = above_20.mean(axis=1).shift(1)
+        f["sector_breadth_50d"] = above_50.mean(axis=1).shift(1)
+        # Change in breadth: expanding vs contracting
+        f["sector_breadth_chg"] = (f["sector_breadth_20d"] - above_20.mean(axis=1).shift(2))
+
+    # Key sector 1d and 5d returns (lagged — yesterday's close is known overnight)
+    for sec in KEY_SECTORS:
+        col = f"{sec}_close"
+        if col in df.columns:
+            s = df[col]
+            f[f"{sec}_ret_1"] = _safe_pct(s, 1).shift(1)
+            f[f"{sec}_ret_5"] = _safe_pct(s, 5).shift(1)
+            f[f"{sec}_ret_20"] = _safe_pct(s, 20).shift(1)
+
+    # Nifty 500 vs Nifty 50 — broader market relative strength (advance/decline proxy)
+    # When 500 > 50, mid/small caps are participating → real breadth, not just heavyweights
+    if "nifty_500_close" in df.columns:
+        f["nifty500_vs_50_ret"] = (_safe_pct(df["nifty_500_close"], 1) - _safe_pct(nclose, 1)).shift(1)
+        f["nifty500_vs_50_5d"] = (_safe_pct(df["nifty_500_close"], 5) - _safe_pct(nclose, 5)).shift(1)
+
+    if "nifty_100_close" in df.columns:
+        f["nifty100_vs_50_ret"] = (_safe_pct(df["nifty_100_close"], 1) - _safe_pct(nclose, 1)).shift(1)
+
+    # Sector momentum: average 5d return across all available sectors
+    sec_ret5_cols = [f"{s}_ret_5" for s in KEY_SECTORS if f"{s}_ret_5" in f.columns]
+    if sec_ret5_cols:
+        f["sector_avg_mom_5d"] = f[sec_ret5_cols].mean(axis=1)
+
     # ── Indian ADR composite features ─────────────────────────────────────
     # ADRs trade on NYSE (close ~02:30 IST) — known before NSE opens.
     # Covers ~25% of Nifty weight. A coordinated ADR move is a direct signal.
@@ -199,6 +262,11 @@ FEATURE_PREFIXES = (
     # Indian ADRs
     "infy_adr_", "hdb_adr_", "ibn_adr_", "wit_adr_", "ttm_adr_",
     "adr_bull_count", "adr_avg_ret", "adr_vs_sp500", "adr_heavy_avg_ret",
+    # Indian sector breadth & momentum (from local NSE dataset)
+    "sector_breadth_", "sector_breadth_chg", "sector_avg_mom_5d",
+    "nifty_bank_", "nifty_it_", "nifty_fin_", "nifty_fmcg_",
+    "nifty_auto_", "nifty_energy_", "nifty_health_", "nifty_infra_",
+    "nifty500_vs_50_", "nifty100_vs_50_",
 )
 TARGET_COLS = {"prev_close", "next_close", "y_logret", "y_dir", "y_mag"}
 

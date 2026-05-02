@@ -69,6 +69,39 @@ OPTIONAL_TICKERS = {
 # Candidate GIFT Nifty / SGX Nifty tickers — tried in order. None are guaranteed.
 GIFT_CANDIDATES = ["GIFTNIFTY", "GIFTNIFTY.NS", "SGX-NIFTY", "^NIFTYIX", "NIFTY50.NS"]
 
+# ── Indian sector indices ─────────────────────────────────────────────────────
+# Local CSV source: Market Dataset since 2015 (NSE data, up to ~Apr 2026).
+# yfinance tickers used for incremental top-up beyond local data cutoff.
+# All indices confirmed working on yfinance as of May 2026.
+LOCAL_DATASET_PATH = os.environ.get(
+    "MARKET_DATASET_PATH",
+    "/Users/manasingle/Edge/Market Dataset since 2015",
+)
+
+SECTOR_FILES = {
+    "nifty_bank":   "NIFTY BANK_day.csv",
+    "nifty_it":     "NIFTY IT_day.csv",
+    "nifty_fin":    "NIFTY FIN SERVICE_day.csv",
+    "nifty_fmcg":   "NIFTY FMCG_day.csv",
+    "nifty_auto":   "NIFTY AUTO_day.csv",
+    "nifty_energy": "NIFTY ENERGY_day.csv",
+    "nifty_health": "NIFTY HEALTHCARE_day.csv",
+    "nifty_infra":  "NIFTY INFRA_day.csv",
+    "nifty_500":    "NIFTY 500_day.csv",
+    "nifty_100":    "NIFTY 100_day.csv",
+}
+
+SECTOR_YF_TICKERS = {
+    "nifty_bank":   "^NSEBANK",
+    "nifty_it":     "^CNXIT",
+    "nifty_auto":   "^CNXAUTO",
+    "nifty_fmcg":   "^CNXFMCG",
+    "nifty_energy": "^CNXENERGY",
+    "nifty_health": "^CNXPHARMA",
+    "nifty_100":    "^CNX100",
+    "nifty_500":    "^CRSLDX",
+}
+
 
 def _flatten(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
@@ -101,6 +134,71 @@ def _try_gift_yfinance(start: str) -> pd.Series | None:
             print(f"  ✓ GIFT Nifty matched yfinance ticker: {cand} ({len(df)} rows)")
             return df["Close"].rename("gift_nifty")
     return None
+
+
+def _load_local_sector(name: str, filename: str) -> pd.Series | None:
+    """Load a sector index close series from the local NSE dataset CSV."""
+    path = os.path.join(LOCAL_DATASET_PATH, filename)
+    if not os.path.exists(path):
+        return None
+    df = pd.read_csv(path, parse_dates=["date"])
+    df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+    df = df.set_index("date").sort_index()
+    return df["close"].rename(f"{name}_close")
+
+
+def fetch_sector_data(start: str) -> pd.DataFrame:
+    """Build sector index closes from local CSVs, topped up with yfinance for recent dates.
+
+    Returns a DataFrame indexed by date with columns <sector>_close for each sector.
+    Only trading days where Nifty has data are included (join is outer here; data_fetcher
+    will inner-join against the Nifty index later).
+    """
+    start_dt = pd.to_datetime(start)
+    frames: dict[str, pd.Series] = {}
+
+    print("\nSector indices (local CSV + yfinance top-up):")
+    for name, filename in SECTOR_FILES.items():
+        local = _load_local_sector(name, filename)
+        if local is not None:
+            local = local[local.index >= start_dt]
+            local_end = local.index.max()
+        else:
+            local_end = start_dt
+
+        # Top-up with yfinance for dates beyond local data cutoff
+        yf_series: pd.Series | None = None
+        if name in SECTOR_YF_TICKERS:
+            top_start = (local_end + timedelta(days=1)).strftime("%Y-%m-%d")
+            df_yf = _download(SECTOR_YF_TICKERS[name], top_start)
+            if df_yf is not None and "Close" in df_yf.columns and len(df_yf) > 0:
+                df_yf = _flatten(df_yf)
+                yf_series = df_yf["Close"].rename(f"{name}_close")
+                yf_series.index = pd.to_datetime(yf_series.index).normalize()
+            time.sleep(0.3)
+
+        if local is not None and yf_series is not None:
+            combined = pd.concat([local, yf_series]).sort_index()
+            combined = combined[~combined.index.duplicated(keep="last")]
+        elif local is not None:
+            combined = local
+        elif yf_series is not None:
+            combined = yf_series
+        else:
+            print(f"  ✗ {name:15s} no local file and yfinance failed; skipping")
+            continue
+
+        frames[name] = combined
+        rows_local = len(local) if local is not None else 0
+        rows_yf = len(yf_series) if yf_series is not None else 0
+        print(f"  ✓ {name:15s} {rows_local} local + {rows_yf} yfinance = {len(combined)} rows")
+
+    if not frames:
+        print("  ! No sector data loaded; breadth features will be absent.")
+        return pd.DataFrame()
+
+    out = pd.concat(frames.values(), axis=1).sort_index()
+    return out
 
 
 def fetch_all(years: int = 10) -> pd.DataFrame:
@@ -156,6 +254,11 @@ def fetch_all(years: int = 10) -> pd.DataFrame:
         else:
             print(f"  ✗ {name:10s} ({sym}) not available; skipping")
         time.sleep(0.4)
+
+    # Indian sector indices — local NSE data + yfinance top-up
+    sector_df = fetch_sector_data(start)
+    if not sector_df.empty:
+        out = out.join(sector_df, how="left")
 
     # GIFT Nifty (best-effort)
     print("- gift_nifty …", end=" ", flush=True)

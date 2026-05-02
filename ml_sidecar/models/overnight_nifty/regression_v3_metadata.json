@@ -1,8 +1,8 @@
 {
   "model_name": "overnight_nifty_regression_v3",
   "version": "v3",
-  "trained_at": "2026-04-27T19:37:04.566819Z",
-  "n_features": 90,
+  "trained_at": "2026-05-02T21:59:47.908327Z",
+  "n_features": 127,
   "feature_columns": [
     "nifty_ret_1",
     "nifty_ret_5",
@@ -90,6 +90,43 @@
     "nifty_rv_vs_vix",
     "inr_nifty_divergence",
     "nifty_up_freq_20",
+    "sector_breadth_20d",
+    "sector_breadth_50d",
+    "sector_breadth_chg",
+    "nifty_bank_ret_1",
+    "nifty_bank_ret_5",
+    "nifty_bank_ret_20",
+    "nifty_it_ret_1",
+    "nifty_it_ret_5",
+    "nifty_it_ret_20",
+    "nifty_fin_ret_1",
+    "nifty_fin_ret_5",
+    "nifty_fin_ret_20",
+    "nifty_fmcg_ret_1",
+    "nifty_fmcg_ret_5",
+    "nifty_fmcg_ret_20",
+    "nifty_auto_ret_1",
+    "nifty_auto_ret_5",
+    "nifty_auto_ret_20",
+    "nifty_energy_ret_1",
+    "nifty_energy_ret_5",
+    "nifty_energy_ret_20",
+    "nifty_health_ret_1",
+    "nifty_health_ret_5",
+    "nifty_health_ret_20",
+    "nifty_infra_ret_1",
+    "nifty_infra_ret_5",
+    "nifty_infra_ret_20",
+    "nifty_500_ret_1",
+    "nifty_500_ret_5",
+    "nifty_500_ret_20",
+    "nifty_100_ret_1",
+    "nifty_100_ret_5",
+    "nifty_100_ret_20",
+    "nifty500_vs_50_ret",
+    "nifty500_vs_50_5d",
+    "nifty100_vs_50_ret",
+    "sector_avg_mom_5d",
     "adr_bull_count",
     "adr_avg_ret_1",
     "adr_vs_sp500",
@@ -109,54 +146,54 @@
     "LARGE (>1.5%)"
   ],
   "walk_forward": {
-    "avg_close_mae_pct": 0.504,
+    "avg_close_mae_pct": 0.502,
     "avg_close_rmse_pct": 0.663,
     "folds": [
       {
         "fold": 1,
         "test_window": "2021-01-01\u21922021-12-31",
         "test_n": 169,
-        "logret_mae_pct": 0.5566,
-        "close_mae_pct": 0.5562,
-        "close_rmse_pct": 0.717
+        "logret_mae_pct": 0.553,
+        "close_mae_pct": 0.5526,
+        "close_rmse_pct": 0.7135
       },
       {
         "fold": 2,
         "test_window": "2022-01-01\u21922022-12-31",
         "test_n": 228,
-        "logret_mae_pct": 0.6021,
-        "close_mae_pct": 0.6032,
-        "close_rmse_pct": 0.7985
+        "logret_mae_pct": 0.5974,
+        "close_mae_pct": 0.5986,
+        "close_rmse_pct": 0.8126
       },
       {
         "fold": 3,
         "test_window": "2023-01-01\u21922023-12-31",
         "test_n": 205,
-        "logret_mae_pct": 0.4226,
-        "close_mae_pct": 0.4226,
-        "close_rmse_pct": 0.5395
+        "logret_mae_pct": 0.4247,
+        "close_mae_pct": 0.4247,
+        "close_rmse_pct": 0.5408
       },
       {
         "fold": 4,
         "test_window": "2024-01-01\u21922024-12-31",
         "test_n": 184,
-        "logret_mae_pct": 0.4984,
-        "close_mae_pct": 0.4992,
-        "close_rmse_pct": 0.68
+        "logret_mae_pct": 0.4869,
+        "close_mae_pct": 0.4876,
+        "close_rmse_pct": 0.6527
       },
       {
         "fold": 5,
         "test_window": "2025-01-01\u21922025-12-31",
         "test_n": 249,
-        "logret_mae_pct": 0.4381,
-        "close_mae_pct": 0.4377,
-        "close_rmse_pct": 0.5794
+        "logret_mae_pct": 0.4462,
+        "close_mae_pct": 0.446,
+        "close_rmse_pct": 0.5935
       }
     ]
   },
   "holdout": {
-    "n": 16,
-    "close_mae_pct": 0.444,
-    "close_rmse_pct": 0.537
+    "n": 20,
+    "close_mae_pct": 0.492,
+    "close_rmse_pct": 0.573
   }
 }
