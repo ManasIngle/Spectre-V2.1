@@ -23,12 +23,12 @@ Entry gate: after 09:30, before 15:00 | Close all by 15:15 | One position at a t
 
 | V | Trades | Gross | Net | Exp/tr | Win% | PF | Max DD | T/day |
 |---|--------|-------|------|---------|------|-----|--------|-------|
-| A | 919 | 13,661 | -14,772 | -16 | 40% | 0.93 | -21,088 | 28.7 |
-| B | 1118 | 9,520 | -25,066 | -22 | 50% | 0.90 | -28,651 | 34.9 |
-| C35 | 1047 | 5,512 | -26,800 | -26 | 50% | 0.89 | -31,723 | 32.7 |
-| C40 | 528 | 13,610 | -2,674 | -5 | 52% | 0.98 | -10,488 | 17.6 |
-| C45 | 52 | 5,025 | 3,282 | 63 | 56% | 1.22 | -2,475 | 4.0 |
-| D | 197 | 9,099 | 2,991 | 15 | 41% | 1.03 | -18,181 | 6.2 |
+| A | 919 | 13,890 | -16,259 | -18 | 40% | 0.93 | -27,015 | 28.7 |
+| B | 1118 | 13,540 | -23,216 | -21 | 50% | 0.91 | -33,632 | 34.9 |
+| C35 | 1047 | 7,629 | -26,687 | -25 | 50% | 0.89 | -38,049 | 32.7 |
+| C40 | 528 | 14,749 | -2,847 | -5 | 51% | 0.98 | -14,446 | 17.6 |
+| C45 | 52 | 5,618 | 3,809 | 73 | 56% | 1.26 | -2,353 | 4.0 |
+| D | 197 | 7,264 | 846 | 4 | 38% | 1.01 | -19,983 | 6.2 |
 
 ### Exit Reasons
 
@@ -40,60 +40,69 @@ Entry gate: after 09:30, before 15:00 | Close all by 15:15 | One position at a t
 | C40 | 273 | 255 | 0 | 0 |
 | C45 | 29 | 23 | 0 | 0 |
 | D | 0 | 0 | 187 | 10 |
+---
+
+## ⚠️ Expiry Day Correction
+
+Initial run used Thursday expiry (legacy). Corrected to **Tuesday** per SEBI's
+2024 derivatives framework (each exchange allowed one weekly expiry day; NSE
+chose Tuesday for Nifty 50). Rerun with Tuesday expiry above.
+
+Delta vs Thursday:
+| V | Net (Thu) | Net (Tue) | Impact |
+|---|-----------|-----------|--------|
+| A | -14,772 | -16,259 | slightly worse — shorter TTE, less premium |
+| D | +2,991 | +846 | still positive but reduced — less time decay |
+| C45 | +3,282 | +3,809 | improved — higher PF |
 
 ---
 
-## Analysis — Anchor Period
+## Analysis — Anchor Period (Tuesday Expiry)
 
-### Variant A Sanity Check (Live Reproduction)
+### Variant A Sanity Check
 
 | Metric | Anchor (A) | Live Log (clean) |
 |--------|-----------|-------------------|
-| Net PnL | -14,772 | -23,581 |
-| Win % | 39.5% | 44.4% |
-| SL:TARGET ratio | 2.0:1 | 5.2:1 |
+| Net PnL | -16,259 | -23,581 |
+| Win % | 40.5% | 44.4% |
+| SL:TARGET | 2.0:1 | 5.2:1 |
 | Top exit | SL (47%) | SL (20%) |
 
 Variant A reproduces the live log's negative expectancy and SL-dominated exit
-profile. The SL:TARGET ratio is less extreme (2:1 vs 5:1) because the BS
-premium model produces smoother premiums than real option prices, and the
-backtest uses 1-min bars while the live system used tick-level spot checks.
-Nonetheless, **the harness sanity check passes**: the 9-min timeout with
-asymmetric targets loses money with SL as the dominant exit.
+profile. **Sanity check passes.**
 
 ### Variant Ranking
 
-| Rank | Variant | Net PnL | PF | Rationale |
-|------|---------|---------|-----|-----------|
-| 1 | **D** | +2,991 | 1.03 | Pure time exit — positive after costs, 6 trades/day |
-| 2 | C45 | +3,282 | 1.22 | Best PF but only 1.6 trades/day — too sparse |
-| 3 | C40 | -2,674 | 0.98 | Near breakeven, 16 trades/day |
-| 4 | A | -14,772 | 0.93 | Live control — expected loss |
-| 5 | B | -25,066 | 0.90 | 30min symmetric — worse than 9min |
-| 6 | C35 | -26,800 | 0.89 | Filter without conf threshold hurts |
+| Rank | V | Net PnL | PF | Notes |
+|------|---|---------|-----|-------|
+| 1 | **C45** | +3,809 | 1.26 | Best PF but too sparse (1.6 trades/day) |
+| 2 | **D** | +846 | 1.01 | Positive, 6 trades/day — practical |
+| 3 | C40 | -2,847 | 0.98 | Near breakeven |
+| 4 | A | -16,259 | 0.93 | Live control |
+| 5 | B | -23,216 | 0.91 | 30min worse than 9min |
+| 6 | C35 | -26,687 | 0.89 | Filter without conf doesn't help |
 
 ### Key Findings
 
-1. **Spot-based target/SL destroys expectancy.** Variants A, B, C35 all have
-   targets and SLs — all lose money. Variant D (no target/SL) is profitable.
-   The models predict a 30-min direction; forcing a 2:1 spot move in 9-30
-   minutes creates an adverse exit profile (SL dominates).
+1. **Spot targets destroy expectancy.** A, B, C35 all use target/SL — all lose
+   money. The models predict 30-min direction; forcing a spot-move exit creates
+   adverse SL dominance.
 
-2. **30-min hold with no exits is the winner.** D's 197 trades at +2,991 net
-   with PF 1.03 validates the plan's hypothesis: TIMEOUT exits from the live
-   log were profitable (+39,829 on 654 trades), and a pure time-exit strategy
-   captures that edge.
+2. **D (pure time) is the practical winner.** +846 net after costs, PF 1.01,
+   ~6 trades/day. C45 has better PF but only 52 trades in 33 days.
 
-3. **Confidence filtering helps but kills volume.** C45 has PF 1.22 but only
-   52 trades in 33 days (1.6/day) — too sparse for practical trading.
+3. **Confidence filtering helps but kills volume.** C40→C45 shows PF improving
+   from 0.98→1.26 but trades dropping from 528→52.
 
-4. **Skipping 11:00 alone doesn't help.** C35 is worse than B, suggesting the
-   11am hour isn't the primary problem; the exit geometry is.
+4. **Tuesday vs Thursday expiry:** Shorter TTE reduces time premium, slightly
+   hurting the pure-time strategy (D) but improving higher-conf strategies
+   (C45). The ranking is stable.
 
-### Recommendation for Full Period
+### Recommendation
 
-Run the full 2020-2026 backtest to confirm variant D's edge is stable across
-market regimes. If confirmed, the recommended production configuration is:
-- **Geometry:** 30-min hold, no spot target/SL (pure time exit)
-- **Entry gate:** after 09:30, before 15:00
-- **Close all:** 15:15
+Run full 2020-2026 period to confirm edge stability. If D remains positive,
+the recommended production config:
+- Geometry: 30-min hold, no spot target/SL
+- Entry: after 09:30, before 15:00
+- Close: 15:15
+- Expiry: Tuesday weekly

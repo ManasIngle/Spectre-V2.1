@@ -40,9 +40,10 @@ def bs_price(spot, strike, tte_years, iv, opt_type, r=RISK_FREE_RATE):
     else:
         return strike * np.exp(-r * tte_years) * norm.cdf(-d2) - spot * norm.cdf(-d1)
 
-def nearest_weekly_thursday(dt):
+def nearest_weekly_expiry(dt):
+    """Return the nearest weekly Tuesday >= dt (Nifty weekly expiry — SEBI changed from Thursday to Tuesday in 2024)."""
     d = dt.date()
-    while d.weekday() != 3:
+    while d.weekday() != 1:  # Tuesday
         d += timedelta(days=1)
     if dt.date() == d and dt.time() >= datetime.strptime("15:30","%H:%M").time():
         d += timedelta(days=7)
@@ -51,7 +52,7 @@ def nearest_weekly_thursday(dt):
     return datetime.combine(d, datetime.strptime("15:30","%H:%M").time(), tzinfo=IST)
 
 def compute_premium(spot, strike, dt, vix):
-    tte = (nearest_weekly_thursday(dt) - dt).total_seconds() / (365*24*3600)
+    tte = (nearest_weekly_expiry(dt) - dt).total_seconds() / (365*24*3600)
     if tte <= 0:
         tte = 1.0/365
     return bs_price(spot, strike, tte, vix/100.0, "CE"), bs_price(spot, strike, tte, vix/100.0, "PE")
@@ -367,6 +368,7 @@ def main():
         "## Configuration",
         f"Lot: {LOT_SIZE} | Brokerage: {BROKERAGE}/trade | Slippage: {SLIPPAGE_BPS}bps/side | r={RISK_FREE_RATE*100:.1f}%",
         "IV proxy: VIX/100 (Black-Scholes approx) | Premiums recomputed each minute",
+        "Nifty weekly expiry: Tuesday (SEBI 2024 circular; changed from Thursday)",
         "Entry gate: after 09:30, before 15:00 | Close all by 15:15 | One position at a time",
         "",
         "### Variants",
