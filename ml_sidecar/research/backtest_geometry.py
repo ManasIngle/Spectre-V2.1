@@ -345,6 +345,10 @@ def fmt_table(results, title):
         m = results.get(v,{})
         if not m or m.get("n_trades",0)==0:
             lines.append(f"| {v} | 0 | 0 | 0 | 0 | - | - | 0 | 0 |")
+        else:
+            lines.append(f"| {v} | {m['n_trades']} | {m['gross_pnl']:,.0f} | {m['net_pnl']:,.0f} | {m['expectancy']:,.0f} | {m['win_rate']:.0f}% | {m['pf']:.2f} | {m['max_dd']:,.0f} | {m['trades_per_day']:.1f} |")
+    return "\n".join(lines)
+
 def fmt_direction_mix(results, variants=None):
     """Disclose CE/PE trade mix for given variants."""
     if variants is None: variants = list(VARIANTS.keys())

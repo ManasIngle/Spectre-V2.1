@@ -2,8 +2,9 @@
 **Date:** 2026-07-19
 
 ## Configuration
-Lot: 65 | Brokerage: 25.0/trade | Slippage: 5.0bps/side | r=6.5%
+Lot: 65 | Brokerage: ₹25.0/trade (per round-trip) | Slippage: 5.0bps/side | r=6.5%
 IV proxy: VIX/100 (Black-Scholes approx) | Premiums recomputed each minute
+Nifty weekly expiry: era-aware — Thursday through Sep 2025, Tuesday from Oct 2025 (SEBI single-expiry-day framework)
 Entry gate: after 09:30, before 15:00 | Close all by 15:15 | One position at a time
 
 ### Variants
@@ -16,93 +17,87 @@ Entry gate: after 09:30, before 15:00 | Close all by 15:15 | One position at a t
 | C45 | 30m | 1.0xATR | 1.0xATR | {11} | 45 |
 | D | 30m | none | none | none | 35 |
 
-## Anchor Period (20260428 -> 20260629)
-> Comparison: 78-day live log (SL>>TARGET, ~breakeven clean sample)
+## Full Period (2020-01-01 -> 2026-06-29)
 
 ### Summary
 
 | V | Trades | Gross | Net | Exp/tr | Win% | PF | Max DD | T/day |
 |---|--------|-------|------|---------|------|-----|--------|-------|
-| A | 919 | 13,890 | -16,259 | -18 | 40% | 0.93 | -27,015 | 28.7 |
-| B | 1118 | 13,540 | -23,216 | -21 | 50% | 0.91 | -33,632 | 34.9 |
-| C35 | 1047 | 7,629 | -26,687 | -25 | 50% | 0.89 | -38,049 | 32.7 |
-| C40 | 528 | 14,749 | -2,847 | -5 | 51% | 0.98 | -14,446 | 17.6 |
-| C45 | 52 | 5,618 | 3,809 | 73 | 56% | 1.26 | -2,353 | 4.0 |
-| D | 197 | 7,264 | 846 | 4 | 38% | 1.01 | -19,983 | 6.2 |
+| A | 42534 | 771,218 | -535,242 | -13 | 40% | 0.94 | -657,376 | 28.6 |
+| B | 52191 | 725,059 | -877,192 | -17 | 49% | 0.91 | -938,074 | 35.1 |
+| C35 | 47001 | 618,697 | -821,101 | -17 | 49% | 0.91 | -864,129 | 31.6 |
+| C40 | 30535 | 623,531 | -318,747 | -10 | 50% | 0.95 | -433,509 | 23.0 |
+| C45 | 7963 | 498,004 | 239,047 | 30 | 53% | 1.10 | -52,134 | 11.4 |
+| D | 8927 | 748,699 | 474,941 | 53 | 46% | 1.14 | -50,896 | 6.0 |
 
 ### Exit Reasons
 
 | V | TARGET | SL | TIMEOUT | EOD |
 |---|--------|-----|---------|-----|
-| A | 216 | 432 | 271 | 0 |
-| B | 567 | 550 | 1 | 0 |
-| C35 | 530 | 516 | 1 | 0 |
-| C40 | 273 | 255 | 0 | 0 |
-| C45 | 29 | 23 | 0 | 0 |
-| D | 0 | 0 | 187 | 10 |
----
+| A | 9945 | 20363 | 12226 | 0 |
+| B | 26411 | 25717 | 46 | 17 |
+| C35 | 23749 | 23192 | 43 | 17 |
+| C40 | 15606 | 14890 | 23 | 16 |
+| C45 | 4193 | 3756 | 11 | 3 |
+| D | 0 | 0 | 8239 | 688 |
 
-## ⚠️ Expiry Day Correction
+### Direction Mix (CE vs PE)
 
-Initial run used Thursday expiry (legacy). Corrected to **Tuesday** per SEBI's
-2024 derivatives framework (each exchange allowed one weekly expiry day; NSE
-chose Tuesday for Nifty 50). Rerun with Tuesday expiry above.
+| V | CE Trades | PE Trades | CE% | PE Net | CE Net |
+|---|-----------|-----------|-----|--------|--------|
+| A | 42087 | 447 | 99% | -570,845 | 35,604 |
+| C40 | 30324 | 211 | 99% | -335,179 | 16,432 |
+| C45 | 7864 | 99 | 99% | 213,967 | 25,080 |
+| D | 8844 | 83 | 99% | 416,787 | 58,153 |
 
-Delta vs Thursday:
-| V | Net (Thu) | Net (Tue) | Impact |
-|---|-----------|-----------|--------|
-| A | -14,772 | -16,259 | slightly worse — shorter TTE, less premium |
-| D | +2,991 | +846 | still positive but reduced — less time decay |
-| C45 | +3,282 | +3,809 | improved — higher PF |
+### A — Per-Year
 
----
+| Year | Trades | Gross ₹ | Net ₹ | PF | Win% |
+|------|--------|---------|-------|-----|------|
+| 2020 | 11334 | 203,755 | -137,496 | 0.93 | 40% |
+| 2021 | 8203 | 45,283 | -202,122 | 0.87 | 39% |
+| 2022 | 8909 | 105,776 | -168,146 | 0.90 | 40% |
+| 2023 | 2221 | 40,584 | -23,460 | 0.93 | 39% |
+| 2024 | 4918 | 154,576 | 2,537 | 1.00 | 41% |
+| 2025 | 3666 | 107,188 | -8,852 | 0.99 | 42% |
+| 2026 | 3283 | 114,057 | 2,297 | 1.00 | 42% |
+| **All** | **42534** | **771,218** | **-535,242** | **-0.06** | **282%** |
 
-## Analysis — Anchor Period (Tuesday Expiry)
+### C40 — Per-Year
 
-### Variant A Sanity Check
+| Year | Trades | Gross ₹ | Net ₹ | PF | Win% |
+|------|--------|---------|-------|-----|------|
+| 2020 | 10055 | 183,862 | -121,545 | 0.94 | 50% |
+| 2021 | 5963 | 82,203 | -99,212 | 0.91 | 49% |
+| 2022 | 6876 | 71,668 | -140,781 | 0.89 | 50% |
+| 2023 | 1053 | 19,867 | -10,644 | 0.94 | 47% |
+| 2024 | 2569 | 134,945 | 54,931 | 1.07 | 52% |
+| 2025 | 1957 | 57,883 | -4,196 | 0.99 | 51% |
+| 2026 | 2062 | 73,104 | 2,699 | 1.00 | 51% |
+| **All** | **30535** | **623,531** | **-318,747** | **-0.05** | **350%** |
 
-| Metric | Anchor (A) | Live Log (clean) |
-|--------|-----------|-------------------|
-| Net PnL | -16,259 | -23,581 |
-| Win % | 40.5% | 44.4% |
-| SL:TARGET | 2.0:1 | 5.2:1 |
-| Top exit | SL (47%) | SL (20%) |
+### C45 — Per-Year
 
-Variant A reproduces the live log's negative expectancy and SL-dominated exit
-profile. **Sanity check passes.**
+| Year | Trades | Gross ₹ | Net ₹ | PF | Win% |
+|------|--------|---------|-------|-----|------|
+| 2020 | 4119 | 180,112 | 47,153 | 1.04 | 52% |
+| 2021 | 1091 | 101,715 | 66,160 | 1.23 | 56% |
+| 2022 | 1328 | 96,234 | 52,936 | 1.14 | 54% |
+| 2023 | 154 | -296 | -4,931 | 0.91 | 42% |
+| 2024 | 538 | 73,985 | 56,437 | 1.20 | 53% |
+| 2025 | 344 | 8,303 | -3,259 | 0.98 | 49% |
+| 2026 | 389 | 37,951 | 24,550 | 1.16 | 54% |
+| **All** | **7963** | **498,004** | **239,047** | **0.10** | **361%** |
 
-### Variant Ranking
+### D — Per-Year
 
-| Rank | V | Net PnL | PF | Notes |
-|------|---|---------|-----|-------|
-| 1 | **C45** | +3,809 | 1.26 | Best PF but too sparse (1.6 trades/day) |
-| 2 | **D** | +846 | 1.01 | Positive, 6 trades/day — practical |
-| 3 | C40 | -2,847 | 0.98 | Near breakeven |
-| 4 | A | -16,259 | 0.93 | Live control |
-| 5 | B | -23,216 | 0.91 | 30min worse than 9min |
-| 6 | C35 | -26,687 | 0.89 | Filter without conf doesn't help |
-
-### Key Findings
-
-1. **Spot targets destroy expectancy.** A, B, C35 all use target/SL — all lose
-   money. The models predict 30-min direction; forcing a spot-move exit creates
-   adverse SL dominance.
-
-2. **D (pure time) is the practical winner.** +846 net after costs, PF 1.01,
-   ~6 trades/day. C45 has better PF but only 52 trades in 33 days.
-
-3. **Confidence filtering helps but kills volume.** C40→C45 shows PF improving
-   from 0.98→1.26 but trades dropping from 528→52.
-
-4. **Tuesday vs Thursday expiry:** Shorter TTE reduces time premium, slightly
-   hurting the pure-time strategy (D) but improving higher-conf strategies
-   (C45). The ranking is stable.
-
-### Recommendation
-
-Run full 2020-2026 period to confirm edge stability. If D remains positive,
-the recommended production config:
-- Geometry: 30-min hold, no spot target/SL
-- Entry: after 09:30, before 15:00
-- Close: 15:15
-- Expiry: Tuesday weekly
+| Year | Trades | Gross ₹ | Net ₹ | PF | Win% |
+|------|--------|---------|-------|-----|------|
+| 2020 | 2179 | 198,890 | 133,400 | 1.19 | 47% |
+| 2021 | 1655 | 49,591 | -140 | 1.00 | 47% |
+| 2022 | 1768 | 119,854 | 65,504 | 1.10 | 47% |
+| 2023 | 565 | 42,380 | 26,075 | 1.16 | 46% |
+| 2024 | 1171 | 142,282 | 106,092 | 1.20 | 45% |
+| 2025 | 899 | 104,951 | 76,672 | 1.20 | 46% |
+| 2026 | 690 | 90,752 | 67,337 | 1.19 | 44% |
+| **All** | **8927** | **748,699** | **474,941** | **0.14** | **321%** |
