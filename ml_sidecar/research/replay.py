@@ -4,7 +4,7 @@ Step 1 — Offline replay harness + live-log validation.
 Faithfully reproduces the live signal pipeline (sidecar.py) using DB data,
 validates against system_signals-18July.csv.
 """
-import os, sys, json, argparse, sqlite3, time as time_mod
+import os, sys, json, argparse, sqlite3, time as time_mod, gc
 import numpy as np
 import pandas as pd
 import joblib
@@ -222,21 +222,23 @@ def replay_signals(nifty_df, vix_series, rolling_model, direction_model,
     results = []
     n_total = len(nifty_df)
     t0 = time_mod.time()
+    current_date = None
 
     for i, (ts, row) in enumerate(nifty_df.iterrows()):
+        # Reset buffers at each new trading day (mirrors sidecar's range=1d)
+        if current_date is None or ts.date() != current_date:
+            bars_buffer.clear()
+            vix_buffer.clear()
+            current_date = ts.date()
+
         bars_buffer.append([row["Close"], row["High"], row["Low"],
                            row["Open"], row["Volume"]])
-        # Cap buffer to last 200 bars (O(n) replay; 200 = ~3.3h, covers all indicators)
-        if len(bars_buffer) > 200:
-            bars_buffer = bars_buffer[-200:]
         if ts in vix_series.index and pd.notna(vix_series.loc[ts]):
             vix_buffer.append(vix_series.loc[ts])
         elif len(vix_buffer) > 0:
             vix_buffer.append(vix_buffer[-1])
         else:
             vix_buffer.append(16.0)
-        if len(vix_buffer) > 200:
-            vix_buffer = vix_buffer[-200:]
 
         X, _ = _extract_features(bars_buffer, feature_cols, ts, vix_closes=list(vix_buffer))
         if X is None:
@@ -410,10 +412,26 @@ def main():
         if direction_model is None:
             direction_model = rolling_model
 
-        print(f"\nReplaying signals ({len(nifty_df):,} minutes)...")
-        replay_df = replay_signals(nifty_df, vix_series, rolling_model,
-                                    direction_model, feature_cols)
-        print(f"  {len(replay_df):,} signal rows generated")
+        # Process day-by-day to keep per-call memory bounded (~375 bars/day)
+        dates = sorted(set(nifty_df.index.date))
+        print(f"\nReplaying signals ({len(dates)} days, {len(nifty_df):,} minutes)...")
+        daily_dfs = []
+        for d, day_date in enumerate(dates):
+            try:
+                day_mask = nifty_df.index.date == day_date
+                day_nifty = nifty_df[day_mask]
+                day_vix = vix_series[vix_series.index.date == day_date]
+                day_replay = replay_signals(day_nifty, day_vix, rolling_model,
+                                            direction_model, feature_cols)
+                if len(day_replay) > 0:
+                    daily_dfs.append(day_replay)
+                print(f"  [{d+1}/{len(dates)}] {day_date}: {len(day_replay)} signals")
+            except Exception as e:
+                print(f"  [{d+1}/{len(dates)}] {day_date}: ERROR - {e}")
+            gc.collect()
+
+        replay_df = pd.concat(daily_dfs).sort_index()
+        print(f"  {len(replay_df):,} total signal rows generated")
         replay_df.to_csv(cache_path, index=True)
         print(f"  Cached -> {cache_path}")
 
