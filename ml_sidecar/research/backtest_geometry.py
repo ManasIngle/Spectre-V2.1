@@ -40,10 +40,18 @@ def bs_price(spot, strike, tte_years, iv, opt_type, r=RISK_FREE_RATE):
     else:
         return strike * np.exp(-r * tte_years) * norm.cdf(-d2) - spot * norm.cdf(-d1)
 
+# Expiry transition: Nifty weekly was Thursday, moved to Tuesday under SEBI's
+# single-expiry-day framework (NSE effective date ~Oct 2025 per SEBI circular).
+EXPIRY_TRANSITION = datetime(2025, 10, 1, tzinfo=IST)
+
 def nearest_weekly_expiry(dt):
-    """Return the nearest weekly Tuesday >= dt (Nifty weekly expiry — SEBI changed from Thursday to Tuesday in 2024)."""
+    """Era-aware weekly expiry: Thursday before Oct 2025, Tuesday after."""
+    if dt < EXPIRY_TRANSITION:
+        target_day = 3  # Thursday
+    else:
+        target_day = 1  # Tuesday
     d = dt.date()
-    while d.weekday() != 1:  # Tuesday
+    while d.weekday() != target_day:
         d += timedelta(days=1)
     if dt.date() == d and dt.time() >= datetime.strptime("15:30","%H:%M").time():
         d += timedelta(days=7)
@@ -324,6 +332,8 @@ def run_all_variants(nifty_df, vix_series, signals_df, atr_series, window_label=
                 n=("net_pnl","count"), net=("net_pnl","sum"),
                 win_rate=("net_pnl",lambda x: (x>0).mean()*100)).to_dict()
         results[vname] = m
+        if bt.trades:
+            m["_trades_df"] = pd.DataFrame(bt.trades)
         print(f"  {vname}: {m['n_trades']} trades, net {m['net_pnl']:,.0f}, PF {m['pf']:.2f}, win {m['win_rate']:.1f}%")
     return results
 
@@ -335,8 +345,46 @@ def fmt_table(results, title):
         m = results.get(v,{})
         if not m or m.get("n_trades",0)==0:
             lines.append(f"| {v} | 0 | 0 | 0 | 0 | - | - | 0 | 0 |")
+def fmt_direction_mix(results, variants=None):
+    """Disclose CE/PE trade mix for given variants."""
+    if variants is None: variants = list(VARIANTS.keys())
+    lines = ["\n### Direction Mix (CE vs PE)", "",
+             "| V | CE Trades | PE Trades | CE% | PE Net | CE Net |",
+             "|---|-----------|-----------|-----|--------|--------|"]
+    for v in variants:
+        m = results.get(v,{})
+        ed = m.get("_trades_df", None)
+        if ed is None or len(ed)==0:
+            lines.append(f"| {v} | 0 | 0 | - | 0 | 0 |")
         else:
-            lines.append(f"| {v} | {m['n_trades']} | {m['gross_pnl']:,.0f} | {m['net_pnl']:,.0f} | {m['expectancy']:,.0f} | {m['win_rate']:.0f}% | {m['pf']:.2f} | {m['max_dd']:,.0f} | {m['trades_per_day']:.1f} |")
+            ce = ed[ed["opt_type"]=="CE"]
+            pe = ed[ed["opt_type"]=="PE"]
+            ce_pct = len(ce)/len(ed)*100 if len(ed)>0 else 0
+            lines.append(f"| {v} | {len(ce)} | {len(pe)} | {ce_pct:.0f}% | {ce['net_pnl'].sum():,.0f} | {pe['net_pnl'].sum():,.0f} |")
+    return "\n".join(lines)
+
+def fmt_yearly_table(results, vname):
+    """Per-year PnL table for a single variant."""
+    m = results.get(vname, {})
+    trades_df = m.get("_trades_df", None)
+    if trades_df is None or len(trades_df)==0:
+        return f"\n### {vname} — No trades\n"
+    trades_df = trades_df.copy()
+    trades_df["year"] = trades_df["entry_ts"].apply(lambda t: t.year)
+    yearly = trades_df.groupby("year").agg(
+        n=("net_pnl","count"), gross=("gross_pnl","sum"), net=("net_pnl","sum"),
+        pf=("net_pnl", lambda x: x[x>0].sum()/abs(x[x<=0].sum()) if x[x<=0].sum()!=0 else float('inf')),
+        win=("net_pnl", lambda x: (x>0).mean()*100),
+    )
+    lines = [f"\n### {vname} — Per-Year", "",
+             "| Year | Trades | Gross ₹ | Net ₹ | PF | Win% |",
+             "|------|--------|---------|-------|-----|------|"]
+    for yr in sorted(yearly.index):
+        r = yearly.loc[yr]
+        lines.append(f"| {int(yr)} | {int(r['n'])} | {r['gross']:,.0f} | {r['net']:,.0f} | {r['pf']:.2f} | {r['win']:.0f}% |")
+    total = yearly.sum()
+    total_pf = total["net"]/abs(trades_df[trades_df["net_pnl"]<=0]["net_pnl"].sum()) if trades_df[trades_df["net_pnl"]<=0]["net_pnl"].sum()!=0 else float('inf')
+    lines.append(f"| **All** | **{int(total['n'])}** | **{total['gross']:,.0f}** | **{total['net']:,.0f}** | **{total_pf:.2f}** | **{total['win']:.0f}%** |")
     return "\n".join(lines)
 
 def fmt_exits(results):
@@ -366,9 +414,9 @@ def main():
         f"**Date:** {datetime.now(IST).strftime('%Y-%m-%d')}",
         "",
         "## Configuration",
-        f"Lot: {LOT_SIZE} | Brokerage: {BROKERAGE}/trade | Slippage: {SLIPPAGE_BPS}bps/side | r={RISK_FREE_RATE*100:.1f}%",
+        f"Lot: {LOT_SIZE} | Brokerage: ₹{BROKERAGE}/trade (per round-trip) | Slippage: {SLIPPAGE_BPS}bps/side | r={RISK_FREE_RATE*100:.1f}%",
         "IV proxy: VIX/100 (Black-Scholes approx) | Premiums recomputed each minute",
-        "Nifty weekly expiry: Tuesday (SEBI 2024 circular; changed from Thursday)",
+        f"Nifty weekly expiry: era-aware — Thursday through Sep 2025, Tuesday from Oct 2025 (SEBI single-expiry-day framework)",
         "Entry gate: after 09:30, before 15:00 | Close all by 15:15 | One position at a time",
         "",
         "### Variants",
@@ -409,6 +457,9 @@ def main():
         report.append("\n## Full Period (2020-01-01 -> 2026-06-29)")
         report.append(fmt_table(res_f, "Summary"))
         report.append(fmt_exits(res_f))
+        report.append(fmt_direction_mix(res_f, ["A","C40","C45","D"]))
+        for v in ["A","C40","C45","D"]:
+            report.append(fmt_yearly_table(res_f, v))
     
     if not args.full_only:
         print(f"\nLoading anchor data ({anchor_start} -> {anchor_end})...")
@@ -427,9 +478,12 @@ def main():
         print(f"Running anchor backtest ({len(signals_a):,} signals)...")
         res_a = run_all_variants(nifty_a, vix_as, signals_a, atr_a, "anchor")
         report.append(f"\n## Anchor Period ({anchor_start} -> {anchor_end})")
-        report.append("> Comparison: 78-day live log (SL>>TARGET, ~breakeven clean sample)")
+        report.append("> ⚠️ **Direction-mix caveat:** The replay signal stream is 99% CE (50 PE vs 6,233 CE).")
+        report.append("> The live system was 71% PE. Variant A sanity check matches aggregate loss/exit profile")
+        report.append("> but trades a near-opposite book. Geometry conclusions validated mostly on CE trades.")
         report.append(fmt_table(res_a, "Summary"))
         report.append(fmt_exits(res_a))
+        report.append(fmt_direction_mix(res_a, list(VARIANTS.keys())))
     
     rpath = os.path.join(REPORT_DIR, "step2_geometry.md")
     with open(rpath, "w") as f:

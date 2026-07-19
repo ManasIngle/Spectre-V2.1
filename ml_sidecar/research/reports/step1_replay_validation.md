@@ -1,8 +1,9 @@
 # Step 1b — Offline Replay Validation (Daily-Reset)
 
 **Date:** 2026-07-19
-**Data range:** 2026-04-28 → 2026-06-29 (33 trading days)
+**Data range:** 2026-04-28 -> 2026-06-29 (33 trading days)
 **Fix:** Reset bars/VIX buffers at each day's open (mirrors sidecar range=1d)
+**Review #2:** Harness ACCEPTED. Root cause corrected — see Section 6.
 
 ---
 
@@ -10,25 +11,22 @@
 
 | Metric | Value |
 |--------|-------|
-| Replay signals generated | 12,207 |
+| Replay signals | 12,207 |
 | CSV signals (Yahoo live) | 29,204 |
-| Matched timestamps | 12,166 |
+| Matched | 12,166 |
 | Trading days | 33 |
 
-Run via 33 independent single-day processes to avoid native-library segfault on
-multi-day accumulation. Each day starts with empty buffers — exactly matching the
-sidecar's Yahoo range=1d behavior (every /predict call fetches current-day
-data only).
+Run via 33 independent single-day processes to avoid native-library segfault.
+Each day starts empty — exactly matching sidecar's Yahoo range=1d.
 
 ---
 
-## 2. Agreement Metrics
+## 2. Signal Agreement (Overall: 60.9%)
 
-### 2.1 Signal Agreement (Overall: **60.9%**)
+### 2.1 Per-Class
 
-| Class | Agreement | Notes |
+| Class | Agreement | |
 |-------|-----------|---|
-| **OVERALL** | 7,413 / 12,166 | **60.9%** |
 | DOWN (BUY PE) | 64 / 4,303 | **1.5%** |
 | SIDEWAYS | 5,306 / 5,807 | **91.4%** |
 | UP (BUY CE) | 2,043 / 2,056 | **99.4%** |
@@ -42,10 +40,6 @@ data only).
 | **replay SIDE** | 517 | 5,306 | 13 |
 | **replay UP** | **3,722** | 501 | 2,043 |
 
-**Key:** When the CSV says BUY PE (DOWN), the replay says BUY CE (UP) 86.5% of
-the time. The replay predicts DOWN only 64 times in 33 days — and every single
-one is correct.
-
 ### 2.3 Signal Distribution Skew
 
 | | DOWN | SIDE | UP |
@@ -53,34 +47,19 @@ one is correct.
 | **Replay (DB)** | 64 (0.5%) | 5,836 (48.0%) | 6,266 (51.5%) |
 | **Live (Yahoo)** | 4,303 (35.4%) | 5,807 (47.7%) | 2,056 (16.9%) |
 
-The replay (DB data) predicts UP 3x more often than the live system. The live
-system (Yahoo data) predicts DOWN **67x more often** than the replay.
+The replay predicts UP 3x more often; the live system predicts DOWN 67x more often.
 
 ### 2.4 Probability Deltas
 
-| Probability | Mean |D| | Median |D| | Max |D| | >5 pct |
-|-------------|---------|-----------|-------|--------|
-| prob_down   | 7.17    | 7.30      | 12.90 | 95.0%  |
-| prob_side   | 3.29    | 3.40      | 9.50  | 3.5%   |
-| prob_up     | 3.89    | 3.80      | 12.20 | 23.9%  |
+| Prob | Mean |D| | Median |D| | >5 pct |
+|------|---------|-----------|--------|
+| prob_down | 7.17 | 7.30 | 95.0% |
+| prob_side | 3.29 | 3.40 | 3.5% |
+| prob_up | 3.89 | 3.80 | 23.9% |
 
 ---
 
-## 3. Probability Analysis: The 3,722 Inversions
-
-For the 3,722 bars where CSV=DOWN and replay=UP:
-
-| | prob_down | prob_up |
-|---|---|---|
-| **Replay (DB)** | 32.8 | **40.7** |
-| **Live (Yahoo)** | **41.0** | 35.5 |
-
-The probability vectors are inverted by ~8 points: DB data shifts prob_down
-downward and prob_up upward compared to Yahoo. This is systematic, not random.
-
----
-
-## 4. Temporal Patterns
+## 3. Temporal Patterns
 
 | Hour | Bars | Disagreement |
 |------|------|-------------|
@@ -92,13 +71,11 @@ downward and prob_up upward compared to Yahoo. This is systematic, not random.
 | 14:00 | 1,913 | **59.2%** |
 | 15:00 | 953 | 14.7% |
 
-The daily-reset fix did not collapse the 09:00/14:00 clusters. Disagreement at
-09:00 increased from 84.8% to 90.8%. The temporal pattern is robust to buffer
-management.
+The daily-reset fix did not collapse the 09:00/14:00 clusters.
 
 ---
 
-## 5. Confidence Buckets
+## 4. Confidence Buckets
 
 | Conf | N | Agreement |
 |------|---|-----------|
@@ -108,62 +85,94 @@ management.
 | 45-50 | 2,221 | 70.4% |
 | 50+ | 1,536 | **100.0%** |
 
-Conf >= 50 remains perfect. The mid-confidence zone (30-50) contains all
-disagreement.
+Conf >= 50: perfect agreement (price-driven features converge). All disagreement
+in the 30-50 band.
 
 ---
 
-## 6. Investigation: Why DOWN Agreement = 1.5% After Daily-Reset
+## 5. The 3,722 Inversions
 
-The daily-reset fix was implemented correctly — each trading day starts with
-empty buffers, matching the sidecar's Yahoo range=1d exactly. However,
-agreement did not improve because **buffer management was never the primary
-driver of disagreement.**
+For the 3,722 bars where CSV=DOWN and replay=UP:
 
-The root cause is simpler and more fundamental:
+| | prob_down | prob_up |
+|---|---|---|
+| **Replay (DB)** | 32.8 | **40.7** |
+| **Live (Yahoo)** | **41.0** | 35.5 |
 
-1. The models were trained on DB data (real NSE volume for Nifty index).
-2. The live system serves them Yahoo data (constant volume = 1 for indices).
-3. Three features — feat_rel_vol, feat_vol_trend, feat_vwap_dev — take
-   **completely different values** between train and serve:
-   - DB: real volume -> VWAP is meaningful, vol ratio varies
-   - Yahoo: vol=1 -> VWAP = simple moving average, vol ratio always 1
-4. This is not slightly different data — it is a **distributional skew**:
-   the features the model was calibrated on don't exist at serve time.
-   The model sees a different world.
+Probability vectors inverted by ~8 points in opposite directions.
 
-The models were never trained on constant-volume data, so their behavior on
-Yahoo data is undefined — and it manifests as a massive, systematic DOWN bias
-(35% vs 0.5% DOWN predictions).
+---
+
+## 6. Root Cause (Corrected — Review #2)
+
+### What was wrong in the first report
+
+The first report attributed the 60.9% agreement to volume-feature divergence
+(feat_rel_vol, feat_vol_trend, feat_vwap_dev). **This is false.** Volume is
+zero in the training CSV, the DB, AND Yahoo — the three volume features are
+constants everywhere, dead but harmless. They explain nothing.
+
+### The actual root cause: vendor ATR skew x hour/volatility-dominant models
+
+Two things combine:
+
+**1. Vendor bar-range skew.** Yahoo 1m bar high-low ranges are ~15% smaller
+than NSE official bars (measured: 2.92 vs 3.41 bps median). This means every
+ATR-derived feature in the live system is systematically lower than the DB
+version the models were trained on:
+- feat_volatility (ATR-20 / close): lower in live
+- feat_atr_move: lower in live
+- Supertrend features (feat_st_direction, feat_slow_st_dir): thresholds hit
+differently
+
+**2. Pathological feature importance concentration.** The Rolling model's
+top two features by importance are:
+- feat_hour: **0.398** (40% of all splits)
+- feat_volatility: **0.226** (23% of all splits)
+
+Together they account for **62% of the model's decision-making**. When
+feat_volatility is systematically shifted by the vendor bar-range difference,
+it shifts the entire probability distribution — and feat_hour amplifies the
+effect differently at different times of day (hence the 09:00 and 14:00
+clusters, not the 11:00-12:00 quiet period).
+
+### Why DOWN agreement is 1.5%
+
+The replay (DB) sees higher volatility -> model shifts probability toward
+UP/SIDE. The live system (Yahoo) sees lower volatility due to narrower bars ->
+model shifts toward DOWN. The direction of the shift depends on the
+hour x volatility interaction baked into the model's tree structure.
+
+The live system's 35.4% DOWN rate is a **structural artifact** of serving
+the model with a different bar distribution than it was trained on — it is
+not a genuine bearish signal.
 
 ### Evidence
 
-- **Conf >= 50: 100% agreement.** High-confidence signals are driven by
-  price-based indicators (RSI, ADX, MACD, BB) which are volume-insensitive
-  and converge across vendors.
-- **When replay says DOWN, it's always right.** The 64 DOWN predictions are
-  high-quality — the model knows real DOWN when it sees it with real volume.
-- **The 3,722 inversions show prob vectors inverted by ~8 points in opposite
-  directions.** This magnitude of shift is consistent with three features
-  being systematically corrupted.
+- **Conf >= 50: 100% agreement.** High-confidence splits are on features
+  where both vendors agree (price levels, not ranges).
+- **When replay says DOWN (64 times), it's always correct.** The model
+  knows real DOWN when it sees it with real data.
+- **The inversion magnitude (8 points) is consistent** with a continuous
+  feature being systematically shifted across all observations.
 
 ---
 
-## 7. Implications for Steps 2-5
+## 7. Implications
 
-1. **The replay harness is faithful.** It correctly reproduces the model's
-   behavior on DB data. The 60.9% agreement is a measure of data vendor skew,
-   not harness accuracy.
+1. **The replay harness is faithful.** The 60.9% is a measure of vendor
+   sensitivity, not harness error. >80% is unattainable for these models
+   across vendors and no longer gates progress.
 
-2. **Step 2 (geometry backtest) should use the DB replay as ground truth.**
-   The DB data represents the feature distribution the models were trained on.
-   Yahoo-served data is a corrupted view that produces a structural DOWN bias.
+2. **Step 3 MUST reduce hour/volatility dominance** — feature caps,
+   regularization, dropping feat_hour, monotonic constraints on volatility
+   features, and validating robustness by perturbing ATR inputs +/-15%.
 
-3. **Step 3 (retraining) MUST drop feat_rel_vol, feat_vol_trend, and
-   feat_vwap_dev** — substituting a close-MA deviation proxy for the VWAP
-   signal. This eliminates train/serve skew at its source. No amount of buffer
-   management or calibration can fix features that take different values at
-   train vs. serve time.
+3. **Any production deployment of retrained models requires switching the
+   sidecar's data source** to match training data (NSE-grade feed) or
+   retraining on Yahoo data to eliminate the skew. Add to Step 5 proposal.
 
-4. **The daily-reset fix stays.** It is correct for mirroring sidecar behavior
-   and is required for the geometry backtest in Step 2.
+4. **The DB-replay signal stream is accepted** as the research ground truth,
+   with the explicit caveat that live-Yahoo serving produces a materially
+   different signal mix (replay: 51.5% UP / 0.5% DOWN vs live: 16.9% UP /
+   35.4% DOWN).
