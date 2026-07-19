@@ -29,3 +29,5 @@ frontend/build/
 *.log
 *.db
 *.sqlite3
+ML_REFINEMENT_PLAN.md
+ml_sidecar/research/data/
