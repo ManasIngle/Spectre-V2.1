@@ -213,6 +213,83 @@ def compute_brier(y_true, y_proba, n_classes=3):
     y_onehot = np.eye(n_classes)[y_true.astype(int)]
     return np.mean((y_proba - y_onehot)**2)
 
+
+import multiprocessing as mp
+from functools import partial
+
+NUM_WORKERS = 4
+
+def _process_day(args):
+    """Process a single day: extract features + labels. Returns DataFrame or None."""
+    day_date, yr_start, yr_end = args
+    try:
+        nifty = load_1m_bars(9, yr_start, yr_end)
+        vix = load_1m_bars(6, yr_start, yr_end)
+        vix_c = vix["Close"] if len(vix)>0 else pd.Series(dtype=float)
+        dm = nifty.index.date == day_date
+        dn = nifty[dm]
+        if len(dn) < 5:
+            return None
+        dv = vix_c[vix_c.index.date == day_date] if len(vix_c)>0 else pd.Series(dtype=float)
+        feats = extract_v2_features_day(dn, dv)
+        if len(feats) < 5:
+            return None
+        feats["label"] = make_labels(dn["Close"].loc[feats.index])
+        feats["close"] = dn["Close"].loc[feats.index]
+        feats = feats.dropna(subset=V2_FEATS + ["label"])
+        if len(feats) > 0:
+            return feats
+    except Exception as e:
+        print(f"  Day {day_date} error: {e}")
+    return None
+
+def build_training_data_parallel(start_yr, end_yr, cache_path=None):
+    """Generate features+labels using multiprocessing across days."""
+    if cache_path and os.path.exists(cache_path):
+        print(f"  Loading cached: {cache_path}")
+        df = pd.read_parquet(cache_path)
+        return df[V2_FEATS].values, df["label"].values, df["close"].values, df
+    
+    print(f"  Building training data {start_yr}-{end_yr} ({NUM_WORKERS} workers)...")
+    t0 = time_mod.time()
+    
+    # Collect all trading days
+    all_days = []
+    for yr in range(start_yr, end_yr+1):
+        yr_start = int(f"{yr}0101000000")
+        yr_end = int(f"{yr}1231235959")
+        # Just get unique dates quickly
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        ddf = pd.read_sql_query(f"SELECT DISTINCT substr(cast(dt as text),1,8) as d FROM candles WHERE instrument_id=9 AND timeframe_id=1 AND dt>={yr_start} AND dt<={yr_end} ORDER BY d", conn)
+        conn.close()
+        for d in ddf["d"]:
+            day_date = date(int(d[:4]), int(d[4:6]), int(d[6:8]))
+            all_days.append((day_date, yr_start, yr_end))
+    
+    print(f"  {len(all_days)} trading days to process")
+    
+    # Parallel processing
+    all_dfs = []
+    with mp.Pool(NUM_WORKERS) as pool:
+        for i, result in enumerate(pool.imap_unordered(_process_day, all_days, chunksize=5)):
+            if result is not None:
+                all_dfs.append(result)
+            if (i+1) % 50 == 0:
+                elapsed = time_mod.time() - t0
+                rate = (i+1) / elapsed
+                eta = (len(all_days) - i - 1) / rate
+                print(f"  [{i+1}/{len(all_days)}] {rate:.1f} days/sec, ETA {eta:.0f}s, rows: {sum(len(d) for d in all_dfs):,}")
+    
+    df = pd.concat(all_dfs).sort_index()
+    elapsed = time_mod.time() - t0
+    print(f"  Done: {len(df):,} rows in {elapsed:.0f}s ({elapsed/len(all_days):.1f}s/day)")
+    
+    if cache_path:
+        df.to_parquet(cache_path)
+        print(f"  Cached -> {cache_path}")
+    return df[V2_FEATS].values, df["label"].values, df["close"].values, df
+
+# (replaced by parallel version above)
 def build_training_data(start_yr, end_yr, cache_path=None):
     """Generate features+labels for a year range. Caches to parquet."""
     if cache_path and os.path.exists(cache_path):
@@ -367,7 +444,7 @@ def main():
     
     # Build training data for full period (2020-2026)
     cache = os.path.join(DATA_DIR, "training_v2.parquet")
-    X, y, closes, df = build_training_data(2020, 2026, cache)
+    X, y, closes, df = build_training_data_parallel(2020, 2026, cache)
     dates = pd.Series(df.index.date)
     print(f"\nTraining data: {len(X):,} rows, {len(V2_FEATS)} features")
     print(f"Label dist: DOWN={(y==0).sum()}, SIDE={(y==1).sum()}, UP={(y==2).sum()}")
