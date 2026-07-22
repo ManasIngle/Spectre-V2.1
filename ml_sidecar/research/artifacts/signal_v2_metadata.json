@@ -1,0 +1,62 @@
+{
+  "feature_columns": [
+    "feat_rsi",
+    "feat_adx",
+    "feat_di_plus",
+    "feat_di_minus",
+    "feat_di_diff",
+    "feat_macd_hist",
+    "feat_ema_spread",
+    "feat_close_ma_dev",
+    "feat_st_direction",
+    "feat_roc_6",
+    "feat_roc_12",
+    "feat_bb_pos",
+    "feat_atr_move",
+    "feat_ret_1",
+    "feat_ret_2",
+    "feat_ret_3",
+    "feat_slow_rsi",
+    "feat_slow_macd_hist",
+    "feat_slow_st_dir",
+    "feat_volatility",
+    "feat_trend_strength",
+    "feat_futures_premium_proxy",
+    "feat_premium_change_rate",
+    "feat_consec_up",
+    "feat_consec_down",
+    "feat_momentum_divergence",
+    "feat_vix_level",
+    "feat_vix_change",
+    "feat_vix_vs_avg",
+    "feat_vix_regime"
+  ],
+  "horizon_bars": 30,
+  "threshold_pct": 0.08,
+  "calibration": "causal_per_fold_subproc",
+  "dropped": [
+    "feat_day_of_week",
+    "feat_equity_advance_pct",
+    "feat_equity_momentum",
+    "feat_equity_weighted_ret",
+    "feat_hour",
+    "feat_minutes_since_open",
+    "feat_session_position"
+  ],
+  "folds": 9,
+  "seed": 42,
+  "robustness_atr": {
+    "0.85": {
+      "f1": 0.317,
+      "agree": 97.5
+    },
+    "1.0": {
+      "f1": 0.333,
+      "agree": 100.0
+    },
+    "1.15": {
+      "f1": 0.3435,
+      "agree": 97.4
+    }
+  }
+}
