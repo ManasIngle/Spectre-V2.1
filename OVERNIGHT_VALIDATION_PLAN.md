@@ -57,6 +57,52 @@ DECISION.md already flags: calibrator fit on the same OOF used to score convicti
 (~5pp optimistic). Redo with nested/causal calibration (calibrate fold k on folds
 < k), rebuild the conviction table, and treat those as the real numbers.
 
+## ⚠️ O1+O2 REVIEW (senior pass, 2026-07-24): O1 PASSES, O2 finding is decisive but incomplete + has a bug
+
+Script `overnight/o1_o2_validate.py` was committed (bad6c0e) but **no report was
+written and no output captured**; senior-run results below.
+
+**O1 — Directional symmetry: PASSES (genuine, symmetric edge).**
+- Says UP: 64.1% (n=415) · Says DOWN: 64.0% (n=283) — the DOWN side is just as
+  accurate as UP, so this is NOT an up-drift follower (unlike intraday variant D).
+- Actual-UP base rate among directional days = 42.6%; model = 64.0% → large real edge.
+- Symmetric and monotonic at every conviction threshold (64% → 80% @ 0.65, UP and
+  DOWN improving together). Reasonably stable per-year (54–71%). O1 is a clear pass.
+
+**O2 — Gap decomposition: TRADEABLE via futures. (Corrected — the committed
+script had two bugs that inverted its conclusion.)**
+
+Script bugs found & fixed in review:
+1. **Units**: returns printed ×100 too large.
+2. **One-day alignment (fatal)**: the model's pred dated T targets the SAME-day
+   move close_{T-1}→close_T (verified: `actual_dir` matches same-day sign 87.5%
+   vs next-day 55%), but the script measured close_T→close_{T+1} — pure noise.
+   Its "open entry captures ~nothing" claim was this bug, not reality.
+
+**Timing (resolved via feature_engineering.py):** each row T uses Nifty through
+T-1 close + overnight US/global data "known by ~03:30 IST on day T", and predicts
+close_T vs close_{T-1}. So the prediction exists before the 09:15 open → the
+feasible, no-look-ahead entry is **open_T → exit close_T** (an intraday cash-session
+futures trade, no overnight gap risk).
+
+**Corrected capture (open_T→close_T, signed by prediction), OOF 2021–25, n=698:**
+
+| conf | n | open→close ret | win% | close→close (accuracy proxy) | dir acc |
+|------|----|------|------|------|------|
+| 0.00 | 698 | **+0.309%** | 69% | +0.595% | 64% |
+| 0.55 | 429 | **+0.427%** | 75% | +0.803% | 73% |
+| 0.60 | 385 | **+0.444%** | 75% | +0.860% | 75% |
+| 0.65 | 294 | **+0.501%** | 78% | +0.959% | 80% |
+
+Net of ~0.03% futures round-trip: **+0.28%/trade (conf 0) to +0.41%/trade
+(conf≥0.6, 385 trades/5y)**. The gap (mean |0.43%|) adds more but isn't
+capturable; the **intraday open→close portion alone is a strong, executable edge**
+— the opposite of the buggy script's conclusion. Instrument MUST be futures;
+options (1–3% spread) would eat a 0.3–0.5% move (Phase-3 lesson).
+
+**O2 verdict: PASS (futures, open→close entry).** Remaining: rewrite the script
+cleanly + `reports/overnight_o1_o2.md` with these corrected numbers.
+
 ## Sequencing
 O1 → O2 first (cheap, decisive; if both fail, overnight is also mostly beta and we
 stop before building infra). Then O5 (fixes the numbers), O3 (the money test),
