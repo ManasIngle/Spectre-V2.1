@@ -30,6 +30,9 @@ func StartSystemCron() {
 		if err := migrateSignalCSV(); err != nil {
 			log.Printf("CSV migration skipped: %v", err)
 		}
+		if err := migrateSignalCSVLLM(); err != nil {
+			log.Printf("LLM-column migration skipped: %v", err)
+		}
 
 		log.Println("System Caching Cron initialized (09:00 - 15:30 IST)")
 		log.Println("Morning Signal Cron initialized (09:09, 09:18 IST)")
@@ -159,6 +162,56 @@ func migrateSignalCSV() error {
 	return nil
 }
 
+// migrateSignalCSVLLM appends a trailing "LLM_Brief" column to an existing
+// signal CSV that predates it, padding old rows with "" so field counts stay
+// consistent. Idempotent (no-op if the column already exists or the file is
+// absent) — safe to run on every startup, so a redeploy adds the column to the
+// persisted volume without disturbing any accumulated data.
+func migrateSignalCSVLLM() error {
+	f, err := os.Open(signalCSVPath())
+	if os.IsNotExist(err) {
+		return nil // fresh file — logSignalToCSV writes the new header directly
+	}
+	if err != nil {
+		return err
+	}
+	rows, err := csv.NewReader(f).ReadAll()
+	f.Close()
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+	for _, col := range rows[0] {
+		if col == "LLM_Brief" {
+			return nil // already migrated
+		}
+	}
+	rows[0] = append(rows[0], "LLM_Brief")
+	for i := 1; i < len(rows); i++ {
+		rows[i] = append(rows[i], "")
+	}
+	tmp := signalCSVPath() + ".llmmigrate.tmp"
+	out, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	w := csv.NewWriter(out)
+	if err := w.WriteAll(rows); err != nil {
+		out.Close()
+		os.Remove(tmp)
+		return err
+	}
+	w.Flush()
+	if err := out.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, signalCSVPath()); err != nil {
+		return err
+	}
+	log.Printf("Migrated %s: appended LLM_Brief column for %d existing rows", signalCSVPath(), len(rows)-1)
+	return nil
+}
+
 func logSignalToCSV(t time.Time, s *models.TradeSignal) {
 	file, err := os.OpenFile(signalCSVPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -189,6 +242,8 @@ func logSignalToCSV(t time.Time, s *models.TradeSignal) {
 			"Scalper_Signal", "Scalper_Down", "Scalper_Side", "Scalper_Up",
 			// Market context
 			"PCR", "Equity_Ret",
+			// Advisory LLM two-liner (latest ~10-min read; repeats between reads)
+			"LLM_Brief",
 		})
 	}
 
@@ -261,6 +316,7 @@ func logSignalToCSV(t time.Time, s *models.TradeSignal) {
 		scalpSig, scalpDown, scalpSide, scalpUp,
 		pcr,
 		fmt.Sprintf("%.3f", s.EquityReturn),
+		LatestLLMBrief(),
 	}
 
 	if err := writer.Write(record); err != nil {

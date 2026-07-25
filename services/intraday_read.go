@@ -75,6 +75,30 @@ func GetLatestIntradayRead() map[string]any {
 	return latestIntradayRead
 }
 
+// LatestLLMBrief returns the most recent LLM two-liner (empty until the first
+// read of the session). Written into every per-minute signal-log row so the
+// advisory read travels with the actively-accumulated logs.
+func LatestLLMBrief() string {
+	latestIntradayReadMu.RLock()
+	read := latestIntradayRead
+	latestIntradayReadMu.RUnlock()
+	if read == nil {
+		return ""
+	}
+	llm, _ := read["llm"].(map[string]any)
+	r, _ := llm["read"].(map[string]any)
+	if r == nil {
+		return ""
+	}
+	if v, ok := r["two_liner"].(string); ok && v != "" {
+		return v
+	}
+	if v, ok := r["summary"].(string); ok { // fallback if two_liner absent
+		return v
+	}
+	return ""
+}
+
 // logIntradayRead appends a flattened row to intraday_reads.csv for history.
 func logIntradayRead(now time.Time, read map[string]any) {
 	gauge, _ := read["gauge"].(map[string]any)
@@ -96,23 +120,35 @@ func logIntradayRead(now time.Time, read map[string]any) {
 		return ""
 	}
 
+	// Compact CSV row for quick history/scanning.
 	path := intradayReadCSVPath()
 	_, statErr := os.Stat(path)
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
+	if err == nil {
+		defer f.Close()
+		w := csv.NewWriter(f)
+		defer w.Flush()
+		if os.IsNotExist(statErr) {
+			w.Write([]string{"Date", "Time", "Regime", "ATR_Pct", "VIX", "TimeBucket",
+				"EffectiveWindow", "Recommendation", "ExpectedVol", "DirectionalLean",
+				"LeanConfidence", "Summary"})
+		}
+		w.Write([]string{
+			now.Format("2006-01-02"), now.Format("15:04:05"),
+			get(gauge, "regime"), get(gauge, "atr_pct"), get(gauge, "vix"), get(gauge, "time_bucket"),
+			get(r, "effective_window"), get(r, "recommendation"), get(r, "expected_volatility"),
+			get(r, "directional_lean"), get(r, "lean_confidence"), get(r, "summary"),
+		})
 	}
-	defer f.Close()
-	w := csv.NewWriter(f)
-	defer w.Flush()
-	if os.IsNotExist(statErr) {
-		w.Write([]string{"Date", "Time", "Regime", "ATR_Pct", "VIX", "TimeBucket",
-			"EffectiveWindow", "ExpectedVol", "DirectionalLean", "LeanConfidence", "Read"})
+
+	// Full elaborate read appended as JSONL so nothing is lost (dashboard/history).
+	if jf, err := os.OpenFile(DataPath("intraday_reads_full.jsonl"),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+		defer jf.Close()
+		if b, err := json.Marshal(map[string]any{
+			"ts": now.Format(time.RFC3339), "read": read,
+		}); err == nil {
+			jf.Write(append(b, '\n'))
+		}
 	}
-	w.Write([]string{
-		now.Format("2006-01-02"), now.Format("15:04:05"),
-		get(gauge, "regime"), get(gauge, "atr_pct"), get(gauge, "vix"), get(gauge, "time_bucket"),
-		get(r, "effective_window"), get(r, "expected_volatility"),
-		get(r, "directional_lean"), get(r, "lean_confidence"), get(r, "read"),
-	})
 }
