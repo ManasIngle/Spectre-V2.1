@@ -55,7 +55,23 @@ model applied to ALL bars = no look-ahead). Three findings, airtight:
   all-bars ~0; two-stage 52–55% on movers). Direction is unpredictable at tradeable
   horizons, and *least* predictable on the volatile bars where it would pay.
 - **The ONE strong intraday signal is move-TIMING (0.82 AUC), a VOLATILITY signal,
-  not a directional one.** Its only viable expression is volatility trading, most
-  plausibly **SELLING premium in predicted-CALM periods** (theta harvest, flips the
-  spread in your favour) — the opposite economic structure to everything that failed.
-  UNTESTED, has tail risk (wrong-calm → gap loss); needs its own decisive test.
+  not a directional one.** But neither expression is cost-viable (below).
+
+## FINAL CLOSURE (2026-07-26) — every avenue tested, intraday is exhausted
+
+| Avenue | Test | Result |
+|---|---|---|
+| Direction, 30-min, technicals | AUC | 0.52 — noise |
+| Direction, 5-min, technicals | AUC / futures P&L | 0.56 but ~0 net; 52-55% on movers |
+| Direction, BankNifty lead | AUC (DB, 1-min) | **0.52 — no lead-lag edge** |
+| Long vol (buy straddle on predicted move) | — | dies on 2× spread (variant-D lesson) |
+| **Short vol (sell straddle in calm)** | BS P&L | **gross ~0 (intraday theta tiny), −1.6 to −6.4 net after spread, ugly tails** |
+
+**Structural reason it's all dead:** (1) direction is not in the available data at
+any tradeable intraday horizon; (2) the real signal — move-timing — is volatility,
+and every volatility expression pays the option bid-ask (1-3%/leg, ×2 for straddles)
+which dwarfs the tiny intraday theta/gamma. Retail option spreads are the wall.
+
+**What could change it (NOT available now):** true order-flow/microstructure or
+live OI/PCR feature streams — neither in this DB. Until then, intraday is closed.
+The project's real, validated edge is the OVERNIGHT model (futures, O1-O3 passed).
