@@ -8,6 +8,7 @@ import MarketDirectionView from './components/MarketDirectionView'
 import TradeSignalsView from './components/TradeSignalsView'
 import InstitutionalView from './components/InstitutionalView'
 import NewsView from './components/NewsView'
+import IntradayReadView from './components/IntradayReadView'
 import MLLogsView from './components/MLLogsView'
 import CockpitView from './components/CockpitView'
 import OvernightView from './components/OvernightView'
@@ -22,6 +23,7 @@ const API = ''
 const ALL_TABS = [
   { key: 'cockpit',      label: 'Cockpit' },
   { key: 'signals',      label: 'Trade Signals' },
+  { key: 'airead',       label: 'AI Read' },
   { key: 'direction',    label: 'Market Direction' },
   { key: 'oi',           label: 'OI Trending' },
   { key: 'table',        label: 'Multitimeframe' },
@@ -210,6 +212,8 @@ function App() {
           <MarketDirectionView />
         ) : view === 'signals' ? (
           <TradeSignalsView />
+        ) : view === 'airead' ? (
+          <IntradayReadView />
         ) : view === 'simulator' ? (
           <SimulatorView />
         ) : view === 'download' ? (

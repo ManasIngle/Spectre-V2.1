@@ -82,6 +82,8 @@ func NewRouter() *gin.Engine {
 		authed.GET("/stability-state", handlers.GetStabilityState)
 		authed.GET("/scalper-signal", handlers.GetScalperSignal)
 		authed.GET("/news", handlers.GetNews)
+		authed.GET("/intraday-read", handlers.GetIntradayRead)
+		authed.POST("/intraday-read/refresh", handlers.RefreshIntradayRead)
 		authed.GET("/heatmap", handlers.GetHeatmap)
 		authed.GET("/overnight-prediction", handlers.GetOvernightPrediction)
 		authed.POST("/overnight-prediction/refresh", handlers.RefreshOvernightData)
