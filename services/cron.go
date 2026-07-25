@@ -68,13 +68,13 @@ func StartSystemCron() {
 				// Intraday LLM market read (advisory) — every 10 min, 09:15–15:15.
 				// Runs in a goroutine so the slow LLM call never blocks the 1-min cron.
 				if now.Minute()%10 == 0 && timeStr >= "09:15" && timeStr <= "15:15" {
-					go func(t time.Time, s *models.TradeSignal) {
-						if read, err := FetchIntradayRead(s); err != nil {
+					go func(t time.Time, s *models.TradeSignal, o *models.OIChainData) {
+						if read, err := FetchIntradayRead(s, o); err != nil {
 							log.Printf("Intraday read error: %v", err)
 						} else {
 							logIntradayRead(t, read)
 						}
-					}(now, signal)
+					}(now, signal, oi)
 				}
 			}
 

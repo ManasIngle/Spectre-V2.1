@@ -23,11 +23,25 @@ var (
 
 func intradayReadCSVPath() string { return DataPath("intraday_reads.csv") }
 
-// FetchIntradayRead POSTs the full trade signal to the sidecar's /intraday_read
-// endpoint, which enriches it with the effectiveness gauge, global context, and
-// news, then calls the LLM. Advisory only — the result never influences trades.
-func FetchIntradayRead(signal *models.TradeSignal) (map[string]any, error) {
-	body, err := json.Marshal(signal)
+// FetchIntradayRead assembles EVERYTHING the system knows and POSTs it to the
+// sidecar's /intraday_read endpoint, which adds the effectiveness gauge, global
+// cross-asset context, and news, then calls the LLM. Advisory only — the result
+// never influences trades. The payload deliberately carries full context (signal
+// + full OI chain + scalper LSTM + overnight next-day bias) so the LLM sees the
+// complete market picture.
+func FetchIntradayRead(signal *models.TradeSignal, oi *models.OIChainData) (map[string]any, error) {
+	payload := map[string]any{"signal": signal}
+	if oi != nil {
+		payload["oi_chain"] = oi // full chain: strikes, OI, OI-change, PCR, totals
+	}
+	if scalper, err := FetchScalperPrediction(); err == nil {
+		payload["scalper_lstm"] = scalper // 3-min horizon scalp signal
+	}
+	if ovn, err := FetchOvernightPrediction(); err == nil && ovn != nil && ovn.Error == "" {
+		payload["overnight_bias"] = ovn // next-day direction/magnitude context
+	}
+
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}

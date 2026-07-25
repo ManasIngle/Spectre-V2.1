@@ -1680,7 +1680,7 @@ def _build_intraday_user(signal: dict, gauge: dict, gctx: dict, news: list) -> s
     return json.dumps({
         "now_ist": dt.datetime.now(zoneinfo.ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M"),
         "effectiveness_gauge": gauge,
-        "project_signal": signal,           # full ML signal payload from Go (models, ensemble, PCR, spot, strikes)
+        "system_state": signal,             # full state from Go: signal (6 models, ensemble), oi_chain, scalper_lstm, overnight_bias
         "global_context_pct": gctx,         # overnight/global cross-asset % changes
         "news_headlines": news,
     }, default=str)
