@@ -5,7 +5,7 @@ models once and serves predictions via HTTP to the Go main server.
 Run: uvicorn sidecar:app --port 8240
 """
 import os, json, time, numpy as np, joblib, datetime as dt
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 import zoneinfo
 
 ML_DIR = os.path.join(os.path.dirname(__file__), "models")
@@ -1494,6 +1494,213 @@ async def morning_predict():
             "generated_at": now.strftime("%H:%M:%S IST"),
             "valid_for_minutes": 5,
             "features_used": len(_old_meta.get("feature_columns", [])),
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "trace": traceback.format_exc()}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Intraday LLM Market Read (advisory)  —  POST /intraday_read
+# Assembles: all project signal data (from Go) + effectiveness gauge (ATR%/VIX/
+# time) + global cross-asset context + news headlines → OpenRouter → a
+# conditional, uncertainty-rated read for the next ~10-min window.
+# Advisory only: never triggers or modifies trades.
+# Provider-agnostic OpenRouter call (OpenAI-compatible); model set by env.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Effectiveness-gauge thresholds — validated in research/reports/intraday_horizon_sweep.md
+_ATR_DEAD, _ATR_ACTIVE = 0.06, 0.12          # ATR% (recent, 5m-rolled)
+_VIX_CALM, _VIX_STRESS = 13.0, 20.0
+
+# Global context basket: label -> yahoo ticker (daily % change, prev->last close)
+_GLOBAL_TICKERS = {
+    "sp500": "%5EGSPC", "nasdaq": "%5EIXIC", "us_vix": "%5EVIX",
+    "nikkei": "%5EN225", "hangseng": "%5EHSI", "kospi": "%5EKS11",
+    "dxy": "DX-Y.NYB", "crude_brent": "BZ=F", "gold": "GC=F", "us10y": "%5ETNX",
+}
+_NEWS_RSS = [
+    "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
+    "https://www.moneycontrol.com/rss/marketreports.xml",
+    "https://www.business-standard.com/rss/markets-106.rss",
+]
+
+
+async def _fetch_pct_change(ticker: str) -> float | None:
+    """Prev-close -> last-close % change from Yahoo daily bars."""
+    try:
+        bars = await _fetch_yahoo_bars(ticker, "1d", "5d")
+        closes = [b["c"] for b in bars if b.get("c")]
+        if len(closes) >= 2 and closes[-2]:
+            return round((closes[-1] - closes[-2]) / closes[-2] * 100, 2)
+    except Exception:
+        return None
+    return None
+
+
+async def _fetch_global_context() -> dict:
+    results = await asyncio.gather(*[_fetch_pct_change(t) for t in _GLOBAL_TICKERS.values()],
+                                   return_exceptions=True)
+    out = {}
+    for name, val in zip(_GLOBAL_TICKERS.keys(), results):
+        out[name] = val if isinstance(val, (int, float)) else None
+    return out
+
+
+async def _fetch_news_headlines(limit: int = 8) -> list[str]:
+    import xml.etree.ElementTree as ET
+    titles: list[str] = []
+    async with aiohttp.ClientSession() as s:
+        for url in _NEWS_RSS:
+            if len(titles) >= limit:
+                break
+            try:
+                async with s.get(url, headers={"User-Agent": "Mozilla/5.0"},
+                                 timeout=aiohttp.ClientTimeout(total=8)) as r:
+                    text = await r.text()
+                root = ET.fromstring(text)
+                for item in root.iter("item"):
+                    t = item.findtext("title")
+                    if t and t.strip():
+                        titles.append(t.strip())
+                    if len(titles) >= limit:
+                        break
+            except Exception:
+                continue
+    return titles[:limit]
+
+
+def _time_bucket(now: dt.datetime) -> str:
+    m = now.hour * 60 + now.minute
+    if m < 9 * 60 + 15 or m > 15 * 60 + 30:
+        return "closed"
+    if 9 * 60 + 15 <= m <= 9 * 60 + 45:
+        return "open-volatile"
+    if 11 * 60 <= m <= 12 * 60 + 30:
+        return "midday-quiet"
+    if 13 * 60 + 30 <= m <= 15 * 60:
+        return "afternoon-active"
+    return "normal"
+
+
+async def _intraday_gauge() -> dict:
+    """Effectiveness switch: recent ATR% + VIX + time bucket -> live/dead + move-likelihood."""
+    try:
+        ist = zoneinfo.ZoneInfo("Asia/Kolkata")
+    except Exception:
+        import pytz
+        ist = pytz.timezone("Asia/Kolkata")
+    now = dt.datetime.now(ist)
+    gauge = {"time_bucket": _time_bucket(now), "atr_pct": None, "vix": None,
+             "regime": "unknown", "move_likelihood": "unknown"}
+    try:
+        from ta.volatility import AverageTrueRange
+        raw = await _fetch_1m("%5ENSEI")
+        r = raw["chart"]["result"][0]
+        q = r["indicators"]["quote"][0]
+        bars = _clean_bars(q.get("close", []), q.get("high", []), q.get("low", []),
+                           q.get("open", q.get("close", [])),
+                           q.get("volume", [1] * len(r.get("timestamp", []))))
+        if len(bars) >= 6:
+            roll = [build_rolling_bar(bars[max(0, i - 4):i + 1]) for i in range(len(bars))]
+            roll = [x for x in roll if x]
+            df = pd.DataFrame(roll, columns=["Close", "High", "Low", "Open", "Volume"])
+            atr = AverageTrueRange(df.High, df.Low, df.Close, 20).average_true_range().iloc[-1]
+            atr_pct = float(atr / df.Close.iloc[-1] * 100)
+            gauge["atr_pct"] = round(atr_pct, 3)
+            gauge["regime"] = "DEAD" if atr_pct < _ATR_DEAD else ("ACTIVE" if atr_pct > _ATR_ACTIVE else "NORMAL")
+            gauge["move_likelihood"] = ("very-low" if atr_pct < _ATR_DEAD else
+                                        "elevated" if atr_pct > _ATR_ACTIVE else "moderate")
+    except Exception as e:
+        gauge["atr_error"] = str(e)
+    try:
+        vix = await _fetch_pct_change("%5EINDIAVIX")  # noqa (change unused; fetch level below)
+        vbars = await _fetch_yahoo_bars("%5EINDIAVIX", "1d", "1d")
+        vlast = [b["c"] for b in vbars if b.get("c")]
+        if vlast:
+            gauge["vix"] = round(float(vlast[-1]), 2)
+            gauge["vix_regime"] = ("calm" if gauge["vix"] < _VIX_CALM else
+                                   "stressed" if gauge["vix"] > _VIX_STRESS else "normal")
+    except Exception:
+        pass
+    return gauge
+
+
+async def _call_openrouter(system: str, user: str) -> dict:
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if not key:
+        return {"configured": False, "error": "OPENROUTER_API_KEY not set in env"}
+    model = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-sonnet-5")
+    body = {"model": model, "messages": [
+        {"role": "system", "content": system}, {"role": "user", "content": user}], "max_tokens": 800}
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+               "HTTP-Referer": "https://spectre.local", "X-Title": "Spectre Intraday Read"}
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post("https://openrouter.ai/api/v1/chat/completions", json=body,
+                             headers=headers, timeout=aiohttp.ClientTimeout(total=35)) as r:
+                data = await r.json(content_type=None)
+        content = data["choices"][0]["message"]["content"]
+        parsed = _lenient_json(content)
+        return {"configured": True, "model": model, "read": parsed, "raw": None if parsed else content}
+    except Exception as e:
+        return {"configured": True, "model": model, "error": str(e)}
+
+
+def _lenient_json(text: str):
+    import re
+    if not text:
+        return None
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return None
+
+
+_INTRADAY_SYSTEM = (
+    "You are an intraday market-context analyst for Nifty50 options, assisting a discretionary "
+    "trader. You are ADVISORY ONLY — you never place trades. Ground every statement in the data "
+    "provided; do not invent numbers. Be honest about uncertainty. IMPORTANT CONTEXT proven by the "
+    "system's own research: intraday DIRECTION is NOT reliably predictable (~coin-flip after costs), "
+    "but VOLATILITY/whether-a-move-is-coming IS predictable (the ATR%/VIX/time gauge). So: use the "
+    "gauge to say whether the setup is EFFECTIVE (moves likely) or DEAD (skip), and treat any "
+    "directional lean as a low-confidence, conditional view the human must judge — never a 'buy CE now' "
+    "instruction. Respond with ONLY a JSON object, no prose, with keys: "
+    "regime (one of DEAD/NORMAL/ACTIVE), effective_window (true/false — is it worth trading now), "
+    "expected_volatility (low/moderate/elevated), directional_lean (UP/DOWN/NEUTRAL), "
+    "lean_confidence (low/medium/high), key_risks (array of short strings), "
+    "read (one honest paragraph, conditional and uncertainty-aware)."
+)
+
+
+def _build_intraday_user(signal: dict, gauge: dict, gctx: dict, news: list) -> str:
+    return json.dumps({
+        "now_ist": dt.datetime.now(zoneinfo.ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M"),
+        "effectiveness_gauge": gauge,
+        "project_signal": signal,           # full ML signal payload from Go (models, ensemble, PCR, spot, strikes)
+        "global_context_pct": gctx,         # overnight/global cross-asset % changes
+        "news_headlines": news,
+    }, default=str)
+
+
+@app.post("/intraday_read")
+async def intraday_read(request: Request):
+    """Advisory LLM market read. Body = the full TradeSignal JSON from Go (optional)."""
+    try:
+        try:
+            signal = await request.json()
+        except Exception:
+            signal = {}
+        gauge, gctx, news = await asyncio.gather(
+            _intraday_gauge(), _fetch_global_context(), _fetch_news_headlines())
+        user = _build_intraday_user(signal, gauge, gctx, news)
+        llm = await _call_openrouter(_INTRADAY_SYSTEM, user)
+        return {
+            "ts": dt.datetime.now(zoneinfo.ZoneInfo("Asia/Kolkata")).isoformat(),
+            "gauge": gauge, "global_context": gctx, "news": news, "llm": llm,
         }
     except Exception as e:
         import traceback
