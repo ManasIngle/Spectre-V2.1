@@ -32,9 +32,17 @@ a walk-forward calibrated v2 retrain, and a decisive set of diagnostics.
    full spread**; real weekly spreads are 1–3%. At 1% → −₹203k, at 2% → −₹709k.
    The edge was entirely the 5bps cost artifact.
 
+## UPDATE 2026-07-26 — the "dead end" was too broad (see intraday_horizon_sweep.md)
+The null below is specific to the **30-minute** horizon. A horizon sweep found a
+real, walk-forward-stable directional edge at **5–10 min on significant (0.15%+)
+moves**: top-decile confidence hits ~65% dir accuracy, ~2 signals/day, positive
+every year 2022–26. This is a live lead, pending (1) a realistically-costed option
+backtest, (2) a two-stage "is a move coming?" gate, (3) OI/PCR features. Intraday
+is NOT closed — the specific 30-min-technical-directional bet is.
+
 ## Bottom line
-- Intraday **directional** prediction (Rolling+Direction → CE/PE): dead. Do not
-  iterate these features hoping for direction.
+- Intraday **directional** prediction **at 30-min from technicals**: dead. But
+  short-horizon (5–10 min) significant-move signals are a live research track.
 - Intraday **long-gamma** (variant D): dies on real option spreads. Not tradeable.
 - Step 4 meta-labeler: moot on a 0.52-AUC base. Shelved.
 - **Value delivered**: 5 steps of honest work prevented deploying real money on a
