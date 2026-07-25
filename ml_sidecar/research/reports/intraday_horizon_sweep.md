@@ -33,11 +33,29 @@ Accuracy rises monotonically with model confidence — confidence is MEANINGFUL
 
 Round-trip ATM-weekly option cost ~2–4 pts → top-decile gross clears it with margin.
 
-## Verdict
-- **Dead**: predicting 30-min direction from technical indicators (0.52).
-- **ALIVE (new lead)**: 5–10 min horizon + significant-move + confidence filter →
-  ~65% directional at the top decile, walk-forward stable, ~2 signals/day.
-- **Unproven before it's tradeable**: (1) real option-premium backtest with 1–3%
-  spreads + the losing volatile days; (2) a live-feasible "is a move coming?" gate
-  (two-stage P(move)×P(dir|move)) — training was move-only; (3) add OI/PCR features
-  (already logged live) to push top-decile from 65% toward 70%+.
+## Money test (2026-07-26) — the 65% was misleading; DIRECTION is not tradeable
+
+Followed the lead to its decisive test (option + futures P&L, walk-forward OOF,
+model applied to ALL bars = no look-ahead). Three findings, airtight:
+
+1. **Long-option P&L is negative at every filter/spread** (top-2% signals: −0.5 to
+   −2.2 pts/trade at 1–3% spread). You pay the spread on every trade; real moves are rare.
+2. **Futures P&L ≈ 0 gross, negative net.** Applying direction to all bars, mean
+   signed 5-min return is +0.003% (≈0.7 idx pts) — below even 0.015% futures cost.
+   The 65% "accuracy" was conditional on a move happening; those are ~3% of bars, so
+   the edge is diluted to ~nothing across all the bars you'd actually trade.
+3. **Two-stage (move-gate × direction) also fails — and reveals why.** Move-TIMING
+   IS strongly predictable (**AUC 0.82**; top-1% move-prob bars move 10× base rate).
+   BUT on exactly those high-move bars, **direction collapses to 52–55%** (coin flip).
+   You can predict WHEN a move comes, not WHICH WAY — especially when it matters.
+   Every two-stage config is net-negative (−1 to −3 pts/trade).
+
+### Final intraday verdict
+- **Directional intraday: definitively dead** — tested 3 ways (30-min 0.52; 5-min
+  all-bars ~0; two-stage 52–55% on movers). Direction is unpredictable at tradeable
+  horizons, and *least* predictable on the volatile bars where it would pay.
+- **The ONE strong intraday signal is move-TIMING (0.82 AUC), a VOLATILITY signal,
+  not a directional one.** Its only viable expression is volatility trading, most
+  plausibly **SELLING premium in predicted-CALM periods** (theta harvest, flips the
+  spread in your favour) — the opposite economic structure to everything that failed.
+  UNTESTED, has tail risk (wrong-calm → gap loss); needs its own decisive test.
