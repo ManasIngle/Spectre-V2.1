@@ -1630,7 +1630,9 @@ async def _call_openrouter(system: str, user: str) -> dict:
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
         return {"configured": False, "error": "OPENROUTER_API_KEY not set in env"}
-    model = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-sonnet-5")
+    # Model comes from the Dokploy env (OPENROUTER_MODEL). `or` handles both an
+    # unset var and an empty string; the fallback only applies when it's blank.
+    model = os.environ.get("OPENROUTER_MODEL") or "anthropic/claude-sonnet-5"
     body = {"model": model, "messages": [
         {"role": "system", "content": system}, {"role": "user", "content": user}], "max_tokens": 2000}
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json",
