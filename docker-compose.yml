@@ -42,6 +42,10 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Asia/Kolkata
+      # Advisory intraday LLM read — set OPENROUTER_API_KEY in Dokploy's Environment tab.
+      # Dokploy only injects a var into the container if the service lists it here.
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-anthropic/claude-sonnet-5}
     volumes:
       # Named volume for ALL model artifacts + runtime data.
       # On first deploy the entrypoint seeds from the baked-in /app/models_seed.
