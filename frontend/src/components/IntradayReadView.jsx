@@ -16,6 +16,17 @@ const IntradayReadView = () => {
     const [payload, setPayload] = useState(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [history, setHistory] = useState([]);
+    const [showHistory, setShowHistory] = useState(false);
+    const [openIdx, setOpenIdx] = useState(null);
+
+    const fetchHistory = useCallback(async () => {
+        try {
+            const res = await fetch('/api/intraday-read/history?limit=40');
+            const j = await res.json();
+            setHistory(j.entries || []);
+        } catch { setHistory([]); }
+    }, []);
 
     const fetchRead = useCallback(async () => {
         try {
@@ -36,9 +47,10 @@ const IntradayReadView = () => {
 
     useEffect(() => {
         fetchRead();
-        const id = setInterval(fetchRead, 60000);
+        fetchHistory();
+        const id = setInterval(() => { fetchRead(); fetchHistory(); }, 60000);
         return () => clearInterval(id);
-    }, [fetchRead]);
+    }, [fetchRead, fetchHistory]);
 
     if (loading) return <Center muted>Loading AI market read…</Center>;
 
@@ -161,6 +173,64 @@ const IntradayReadView = () => {
                     </div>
                 </Card>
             )}
+
+            {/* HISTORY */}
+            <Card>
+                <Row between>
+                    <Row><span>🕘</span><Sub>Read History ({history.length})</Sub></Row>
+                    <button onClick={() => setShowHistory(s => !s)} style={{
+                        padding: '0.25rem 0.7rem', borderRadius: 'var(--radius-sm)', border: 'none',
+                        fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer',
+                        background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)',
+                    }}>{showHistory ? 'Hide' : 'Show'}</button>
+                </Row>
+                {showHistory && (
+                    history.length === 0 ? (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                            No past reads yet — they accumulate every 10 min during market hours.
+                        </div>
+                    ) : (
+                        <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem',
+                                      maxHeight: 380, overflowY: 'auto' }}>
+                            {history.map((e, i) => {
+                                const hr = e?.read?.llm?.read || {};
+                                const hg = e?.read?.gauge || {};
+                                const rg = REGIME[hr.regime] || REGIME.NORMAL;
+                                const open = openIdx === i;
+                                return (
+                                    <div key={i} onClick={() => setOpenIdx(open ? null : i)} style={{
+                                        padding: '0.45rem 0.7rem', borderRadius: 'var(--radius-sm)',
+                                        background: 'rgba(255,255,255,0.03)', cursor: 'pointer',
+                                        borderLeft: `3px solid ${rg.color}`,
+                                    }}>
+                                        <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                            <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', minWidth: 60 }}>
+                                                {e.ts ? new Date(e.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                            </span>
+                                            <span style={{ fontSize: '0.65rem', fontWeight: 800, color: rg.color }}>{hr.regime || hg.regime || '—'}</span>
+                                            {hr.recommendation && (
+                                                <span style={{ fontSize: '0.62rem', fontWeight: 700, color: (REC[hr.recommendation] || REC.SELECTIVE).color }}>
+                                                    {hr.recommendation}
+                                                </span>
+                                            )}
+                                            <span style={{ fontSize: '0.72rem', color: 'var(--text-primary)', flex: 1, minWidth: 0,
+                                                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: open ? 'normal' : 'nowrap' }}>
+                                                {hr.two_liner || hr.summary || '—'}
+                                            </span>
+                                        </div>
+                                        {open && hr.detailed_read && (
+                                            <div style={{ marginTop: '0.45rem', fontSize: '0.75rem', lineHeight: 1.55,
+                                                          color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }}>
+                                                {hr.detailed_read}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )
+                )}
+            </Card>
 
             <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', textAlign: 'center', padding: '0.2rem' }}>
                 Advisory only — does not place or modify trades. Direction is low-confidence by design; the volatility gauge is the reliable signal.

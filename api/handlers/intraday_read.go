@@ -1,7 +1,11 @@
 package handlers
 
 import (
+	"bufio"
+	"encoding/json"
 	"net/http"
+	"os"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"spectre/services"
@@ -19,6 +23,52 @@ func GetIntradayRead(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"available": true, "data": read})
+}
+
+// GetIntradayReadHistory returns the most recent advisory reads from the
+// accumulated JSONL log, newest first. ?limit=N (default 20, max 200).
+func GetIntradayReadHistory(c *gin.Context) {
+	limit := 20
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	f, err := os.Open(services.DataPath("intraday_reads_full.jsonl"))
+	if err != nil {
+		// No history yet is a normal state, not an error.
+		c.JSON(http.StatusOK, gin.H{"available": false, "entries": []any{}})
+		return
+	}
+	defer f.Close()
+
+	// Keep only the last `limit` lines (file is append-only and can grow).
+	ring := make([]string, 0, limit)
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 1024*1024), 8*1024*1024) // reads can be large
+	for sc.Scan() {
+		line := sc.Text()
+		if line == "" {
+			continue
+		}
+		if len(ring) == limit {
+			ring = ring[1:]
+		}
+		ring = append(ring, line)
+	}
+
+	entries := make([]any, 0, len(ring))
+	for i := len(ring) - 1; i >= 0; i-- { // newest first
+		var obj any
+		if err := json.Unmarshal([]byte(ring[i]), &obj); err == nil {
+			entries = append(entries, obj)
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"available": len(entries) > 0, "entries": entries})
 }
 
 // RefreshIntradayRead generates a fresh advisory read on demand (button in the UI).

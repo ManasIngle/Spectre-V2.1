@@ -73,6 +73,20 @@ def build_features(raw: pd.DataFrame) -> pd.DataFrame:
     ]
     df[foreign_cols] = df[foreign_cols].ffill()
 
+    # Forward-fill the domestic sector closes too, but SEPARATELY — they stay out
+    # of `foreign_cols` so they keep their .shift(1) lag below (that shift is the
+    # b578185 leakage fix; do not undo it). ffill only carries PAST values
+    # forward, so it cannot leak future information — it mirrors what a live
+    # prediction would see when a sector feed is missing for a day.
+    # Without this, a single patchy sector series (e.g. nifty_fin) makes the
+    # dropna() at the end delete otherwise-usable recent rows.
+    _domestic_close_cols = [
+        c for c in df.columns
+        if c.endswith("_close") and any(c.startswith(p) for p in _DOMESTIC_PREFIXES)
+    ]
+    if _domestic_close_cols:
+        df[_domestic_close_cols] = df[_domestic_close_cols].ffill()
+
     # ── Nifty derived (lagged by 1) ────────────────────────────────────────
     nclose = df["nifty_close"]
     nhigh, nlow = df["nifty_high"], df["nifty_low"]

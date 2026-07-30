@@ -173,3 +173,34 @@ Each run is < 5 minutes.
 ## Models A–E (existing intraday/scalp models)
 
 These predate the overnight model and are documented in [`SPECTRE_ARCHITECTURE.md`](../SPECTRE_ARCHITECTURE.md). The overnight model is independent of them — different inputs (yfinance daily bars vs live 1m/5m), different horizon (next-day close vs intraday), different consumer (advisory output vs live trade triggers).
+
+---
+
+## G. Intraday LLM Market Read (advisory, non-ML)
+
+**Not a trained model** — an LLM-based advisory layer. Listed here because it is a
+production inference component served by the sidecar.
+
+| Field | Value |
+|---|---|
+| Endpoint | `POST /intraday_read` (sidecar) → `GET/POST /api/intraday-read[/history,/refresh]` (Go) |
+| Trigger | Go cron every 10 min, 09:15–15:15 IST (goroutine — never blocks the 1-min cron) |
+| Provider | OpenRouter (OpenAI-compatible HTTP) |
+| Config | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` — **env-only, no hardcoded default**; forwarded to the sidecar in `docker-compose.yml` |
+| Output | Structured JSON: regime, effective_window, recommendation, expected_volatility, directional_lean + confidence, summary, **two_liner**, global_macro, options_chain_read, internal_models, news_watch, key_levels, watch_next_10min, key_risks, detailed_read |
+| Persistence | `intraday_reads.csv` (compact) + `intraday_reads_full.jsonl` (full) on `spectre_data`; `two_liner` also written to every `system_signals.csv` row via the `LLM_Brief` column |
+| UI | "AI Read" dashboard tab (live panel + Refresh + read history) |
+
+**Inputs fed to the LLM** (full system state): the 6-model signal + ensemble, the
+complete OI chain (strikes/OI/ΔOI/PCR), the 3m scalper, the overnight bias, the
+effectiveness gauge (ATR% + India VIX + time-of-day), global cross-asset % moves,
+and market-news RSS headlines.
+
+**Design constraint (important):** the system prompt is grounded in this project's
+own research — intraday **direction** is not reliably predictable, while
+**volatility/move-timing is** (ATR% gauge, AUC 0.82). The LLM is therefore
+instructed to judge *engage vs stand-aside* and to present any directional lean as
+low-confidence context, never as a trade instruction. It is **advisory only** and
+never triggers or modifies trades.
+
+Cost: ~750 calls/month ≈ 2–2.5M input / 0.7–1.1M output tokens.
