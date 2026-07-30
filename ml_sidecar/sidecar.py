@@ -1635,31 +1635,123 @@ async def _call_openrouter(system: str, user: str) -> dict:
     model = os.environ.get("OPENROUTER_MODEL", "").strip()
     if not model:
         return {"configured": False, "error": "OPENROUTER_MODEL not set in env"}
-    body = {"model": model, "messages": [
-        {"role": "system", "content": system}, {"role": "user", "content": user}], "max_tokens": 2000}
+    # Token budget. REASONING models (e.g. deepseek-v4-pro) spend a large share of
+    # the budget on internal reasoning BEFORE emitting the answer — at 2000 the
+    # response was truncated mid-reasoning ~93% of the time. Override per-model
+    # with OPENROUTER_MAX_TOKENS / OPENROUTER_TIMEOUT_S in the Dokploy env.
+    try:
+        max_tokens = int(os.environ.get("OPENROUTER_MAX_TOKENS", "") or 12000)
+    except ValueError:
+        max_tokens = 12000
+    try:
+        timeout_s = int(os.environ.get("OPENROUTER_TIMEOUT_S", "") or 120)
+    except ValueError:
+        timeout_s = 120
+
+    body = {"model": model,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}],
+            "max_tokens": max_tokens,
+            # Ask for JSON directly; ignored by models that don't support it.
+            "response_format": {"type": "json_object"}}
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json",
                "HTTP-Referer": "https://spectre.local", "X-Title": "Spectre Intraday Read"}
     try:
         async with aiohttp.ClientSession() as s:
             async with s.post("https://openrouter.ai/api/v1/chat/completions", json=body,
-                             headers=headers, timeout=aiohttp.ClientTimeout(total=35)) as r:
+                             headers=headers, timeout=aiohttp.ClientTimeout(total=timeout_s)) as r:
                 data = await r.json(content_type=None)
-        content = data["choices"][0]["message"]["content"]
+
+        if "choices" not in data:  # provider-level error (auth, bad model, credits)
+            return {"configured": True, "model": model,
+                    "error": f"provider error: {str(data)[:300]}"}
+
+        choice = data["choices"][0]
+        msg = choice.get("message") or {}
+        content = msg.get("content")
+        finish = choice.get("finish_reason")
+        # Some reasoning models put the answer in `reasoning` when content is empty.
+        if not content:
+            content = msg.get("reasoning") or msg.get("reasoning_content") or ""
+
         parsed = _lenient_json(content)
-        return {"configured": True, "model": model, "read": parsed, "raw": None if parsed else content}
+        out = {"configured": True, "model": model, "read": parsed,
+               "finish_reason": finish, "usage": data.get("usage")}
+        if not parsed:
+            # Surface WHY instead of failing silently (the old code logged raw=None).
+            out["error"] = (
+                f"could not parse JSON (finish_reason={finish}"
+                + (", output truncated — raise OPENROUTER_MAX_TOKENS"
+                   if finish == "length" else "")
+                + (", empty content — model spent the budget on reasoning"
+                   if not content else "") + ")"
+            )
+            out["raw"] = (content or "")[:1500]
+        return out
     except Exception as e:
-        return {"configured": True, "model": model, "error": str(e)}
+        return {"configured": True, "model": model, "error": f"{type(e).__name__}: {e}"}
 
 
 def _lenient_json(text: str):
+    """Extract a JSON object from an LLM response.
+
+    Tolerates: markdown fences, prose around the JSON, and — importantly for
+    reasoning models — output that was TRUNCATED mid-object, which we repair by
+    closing any open string/braces so the completed fields are still usable.
+    """
     import re
     if not text:
         return None
-    m = re.search(r"\{.*\}", text, re.DOTALL)
-    if not m:
+    s = text.strip()
+
+    # Strip ```json ... ``` fences if present.
+    fence = re.search(r"```(?:json)?\s*(.*?)```", s, re.DOTALL)
+    if fence:
+        s = fence.group(1).strip()
+
+    start = s.find("{")
+    if start == -1:
         return None
+    body = s[start:]
+
+    # 1) Straight parse of the largest balanced-looking span.
+    end = body.rfind("}")
+    if end != -1:
+        try:
+            return json.loads(body[:end + 1])
+        except Exception:
+            pass
+
+    # 2) Repair truncation: walk the text tracking string/escape state, then
+    #    close whatever is still open. Salvages the fields that did arrive.
+    stack, in_str, esc = [], False, False
+    for ch in body:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+
+    repaired = body
+    if in_str:
+        repaired += '"'
+    # Drop a dangling "key": or trailing comma so the close is valid.
+    repaired = re.sub(r",\s*$", "", repaired.rstrip())
+    repaired = re.sub(r',?\s*"[^"]*"\s*:\s*$', "", repaired.rstrip())
+    # Close open containers in reverse order, matching bracket type.
+    repaired += "".join("}" if c == "{" else "]" for c in reversed(stack))
     try:
-        return json.loads(m.group(0))
+        return json.loads(repaired)
     except Exception:
         return None
 
