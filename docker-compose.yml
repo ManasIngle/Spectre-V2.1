@@ -18,6 +18,10 @@ services:
       - SESSION_SECRET=${SESSION_SECRET}
       - BOOTSTRAP_ADMIN_USER=${BOOTSTRAP_ADMIN_USER:-admin}
       - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD}
+      # Historical Logs API — set LOGS_API_KEY in Dokploy's Environment tab to
+      # allow X-API-Key access for scripts/notebooks. Left unset = header auth
+      # disabled entirely (admin session cookie only). Never hardcode a value.
+      - LOGS_API_KEY=${LOGS_API_KEY}
     volumes:
       # Named volume — managed by Docker, independent of git checkout.
       # Survives Dokploy redeploys, repo re-clones, and `docker compose down`.
