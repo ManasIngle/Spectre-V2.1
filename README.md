@@ -111,3 +111,39 @@ Required files: `NIFTY 50_minute.csv`, `NIFTY BANK_minute.csv`, `INDIA VIX_minut
 | Binary size     | ~600MB (venv) | ~12MB        |
 | Concurrency     | GIL-limited   | goroutines   |
 | ML inference    | In-process    | Sidecar HTTP |
+
+## Historical Logs API
+
+Pull the full accumulated history straight into an analysis environment — no
+manual CSV download/upload.
+
+**Auth (either):** an admin session cookie, or `X-API-Key` matching the
+`LOGS_API_KEY` env var (set it in Dokploy). If `LOGS_API_KEY` is unset the
+header path is disabled and only an admin cookie works — never public.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/logs` | Manifest: every log with rows, bytes, modified, date range |
+| `GET /api/logs/:key` | One full log (JSON by default) |
+| `GET /api/logs/:key?format=csv` | Raw CSV passthrough — feeds `pd.read_csv` directly |
+| `GET /api/logs/bundle` | **Every log in one JSON response** |
+
+Query params on `:key` and `bundle`: `from=YYYY-MM-DD`, `to=YYYY-MM-DD`,
+plus `limit` / `offset` on `:key`. Default is the **full** log.
+
+Keys: `signals`, `trades`, `grades`, `scorecard`, `option_array`,
+`intraday_reads`, `intraday_reads_full`, `overnight_predictions`.
+
+```python
+import pandas as pd, requests, io
+H = {"X-API-Key": "<LOGS_API_KEY>"}
+B = "https://<host>/api/logs"
+
+df = pd.read_csv(io.StringIO(requests.get(f"{B}/signals?format=csv", headers=H).text))
+trades = pd.DataFrame(requests.get(f"{B}/trades", headers=H).json()["rows"])
+everything = requests.get(f"{B}/bundle", headers=H).json()["bundle"]
+```
+
+**Security:** files are resolved only through a hardcoded whitelist — never from
+a caller-supplied path — so path traversal is impossible and `users.json`
+(credentials, same directory) can never be served.
