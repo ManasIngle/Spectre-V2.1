@@ -31,3 +31,9 @@ frontend/build/
 *.sqlite3
 ML_REFINEMENT_PLAN.md
 ml_sidecar/research/data/
+
+# Local secrets — never commit API keys / credentials
+*api-key*.txt
+*apikey*.txt
+*.key
+secrets.txt
