@@ -203,4 +203,10 @@ instructed to judge *engage vs stand-aside* and to present any directional lean 
 low-confidence context, never as a trade instruction. It is **advisory only** and
 never triggers or modifies trades.
 
-Cost: ~750 calls/month ≈ 2–2.5M input / 0.7–1.1M output tokens.
+**Measured cost** (deepseek/deepseek-v4-pro, 2026-07-31): $0.0101/call →
+~756 calls/month = **~$7.65/month** (3.9M input / 1.0M output tokens).
+
+**Reasoning-model note:** budget defaults are `OPENROUTER_MAX_TOKENS=12000`
+and `OPENROUTER_TIMEOUT_S=120` (both env-overridable). At the original 2000,
+reasoning models were truncated before emitting the answer and 93% of reads
+silently failed. The JSON parser also repairs truncated output.
