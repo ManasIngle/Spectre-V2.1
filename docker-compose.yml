@@ -22,6 +22,8 @@ services:
       # allow X-API-Key access for scripts/notebooks. Left unset = header auth
       # disabled entirely (admin session cookie only). Never hardcode a value.
       - LOGS_API_KEY=${LOGS_API_KEY}
+      # Must exceed the sidecar's OPENROUTER_TIMEOUT_S or reads are cut off.
+      - INTRADAY_READ_TIMEOUT_S=${INTRADAY_READ_TIMEOUT_S}
     volumes:
       # Named volume — managed by Docker, independent of git checkout.
       # Survives Dokploy redeploys, repo re-clones, and `docker compose down`.
@@ -50,6 +52,9 @@ services:
       # Dokploy only injects a var into the container if the service lists it here.
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OPENROUTER_MODEL=${OPENROUTER_MODEL}
+      # Reasoning models need a large budget/timeout — see MODELS.md entry G.
+      - OPENROUTER_MAX_TOKENS=${OPENROUTER_MAX_TOKENS}
+      - OPENROUTER_TIMEOUT_S=${OPENROUTER_TIMEOUT_S}
     volumes:
       # Named volume for ALL model artifacts + runtime data.
       # On first deploy the entrypoint seeds from the baked-in /app/models_seed.

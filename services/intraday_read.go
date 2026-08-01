@@ -6,14 +6,27 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
 	"spectre/models"
 )
 
-// llmClient has a long timeout — the LLM call can take 10-30s.
-var llmClient = &http.Client{Timeout: 40 * time.Second}
+// llmClient must out-wait the SIDECAR's own OpenRouter timeout
+// (OPENROUTER_TIMEOUT_S, default 120s) — otherwise Go hangs up while the sidecar
+// is still working and the read is lost. Keep this comfortably larger.
+// Override with INTRADAY_READ_TIMEOUT_S.
+var llmClient = &http.Client{Timeout: readClientTimeout()}
+
+func readClientTimeout() time.Duration {
+	if v := os.Getenv("INTRADAY_READ_TIMEOUT_S"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 150 * time.Second
+}
 
 // latestIntradayRead caches the most recent advisory read for the frontend.
 var (

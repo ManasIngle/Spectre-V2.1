@@ -72,11 +72,18 @@ func StartSystemCron() {
 				// Runs in a goroutine so the slow LLM call never blocks the 1-min cron.
 				if now.Minute()%10 == 0 && timeStr >= "09:15" && timeStr <= "15:15" {
 					go func(t time.Time, s *models.TradeSignal, o *models.OIChainData) {
-						if read, err := FetchIntradayRead(s, o); err != nil {
+						read, err := FetchIntradayRead(s, o)
+						if err != nil {
+							// Log the FAILURE too — previously this only went to
+							// stdout, so a failed read vanished from the logs and
+							// looked like the cron never fired. Now it's visible.
 							log.Printf("Intraday read error: %v", err)
-						} else {
-							logIntradayRead(t, read)
+							read = map[string]any{
+								"llm": map[string]any{"configured": true,
+									"error": "transport: " + err.Error()},
+							}
 						}
+						logIntradayRead(t, read)
 					}(now, signal, oi)
 				}
 			}
